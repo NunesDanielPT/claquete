@@ -66,3 +66,6 @@ A primeira conta registada é administradora. Ícone **Admin** no menu: resumo e
 
 ## AV Freelancers (rede)
 Perfil profissional opcional (Definições → Perfil profissional, ou menu AV Freelancers): funções, cidade, disponibilidade para viajar, software, equipamento e carreira. Só aparece na pesquisa se o utilizador ativar «visível». Mensagens passam pelo chat (a primeira mensagem segue num pedido de amizade); email/telemóvel só são partilhados após autorização. Lógica e listas em `people.py` (Dockerfile já copia `*.py`).
+
+## Envio de faturas por email
+Definições → Envio de faturas por email: cada utilizador liga o seu SMTP (Gmail com palavra-passe de aplicação, Outlook, etc.), define a mensagem por omissão e envia a partir do evento (anexa o PDF da fatura emitida e, opcionalmente, o resumo do Claquete). A palavra-passe fica cifrada na base de dados (chave derivada do segredo interno). Só se envia para os emails guardados na ficha do cliente, com limite de 30 envios por hora por utilizador. As faturas anexadas ficam na base de dados (incluídas nas cópias de segurança). O servidor tem de poder sair para as portas 587/465. Lógica em `mailer.py`.

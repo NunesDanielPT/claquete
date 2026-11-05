@@ -7,8 +7,8 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from http import cookies
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs, quote
-import i18n, ws, guide, guide_art, export, people
+from urllib.parse import urlparse, parse_qs, quote, unquote
+import i18n, ws, guide, guide_art, export, people, mailer
 import threading as _th
 THR = _th.local()
 from i18n import tx, M0, M1
@@ -121,6 +121,8 @@ def migrate(c):
     ec = {r[1] for r in c.execute("pragma table_info(events)")}
     for name, ddl in (("vat_mode", "text default 'none'"), ("vat_rate", "real default 0"), ("wh_rate", "real default 0")):
         if ec and name not in ec: c.execute(f"alter table events add column {name} {ddl}")
+    cc = {r[1] for r in c.execute("pragma table_info(clients)")}
+    if cc and "email" not in cc: c.execute("alter table clients add column email text")
     fc = {r[1] for r in c.execute("pragma table_info(friends)")}
     if fc and "intro" not in fc: c.execute("alter table friends add column intro text")
     mc = {r[1] for r in c.execute("pragma table_info(chat_msgs)")}
@@ -278,6 +280,10 @@ def init():
     create table if not exists pro(user_id integer primary key, visible integer default 0, headline text, city text, travel text default 'no', roles text, roles_other text,
       software text, gear text, career text, companies text, projects text, updated text);
     create table if not exists contact_req(id integer primary key, a integer not null, b integer not null, status text default 'pending', s_email integer default 0, s_phone integer default 0, created text, unique(a, b));
+    create table if not exists invoice_files(event_id integer primary key references events(id) on delete cascade, name text, size integer, data blob, created text);
+    create table if not exists mailcfg(user_id integer primary key, host text, port integer default 587, sec text default 'starttls', username text, pw_enc text, from_name text, from_email text, reply_to text,
+      subject text, body text, signature text, send_pdf integer default 0, footer integer default 1);
+    create table if not exists mail_log(id integer primary key, user_id integer, event_id integer, to_addr text, subject text, status text, error text, created text);
     create table if not exists friends(id integer primary key, a integer not null, b integer not null, status text default 'pending', created text, unique(a, b));
     create table if not exists chats(id integer primary key, kind text, name text, owner integer, created text);
     create table if not exists chat_members(chat_id integer references chats(id) on delete cascade, user_id integer, last_read integer default 0, primary key(chat_id, user_id));
@@ -706,7 +712,7 @@ def chat_badge(uid):
 
 def purge_user(tid):
     run("delete from events where user_id=?", (tid,)); run("delete from clients where user_id=?", (tid,)); run("delete from tickets where user_id=?", (tid,))
-    run("delete from friends where a=? or b=?", (tid, tid)); run("delete from pro where user_id=?", (tid,)); run("delete from contact_req where a=? or b=?", (tid, tid))
+    run("delete from friends where a=? or b=?", (tid, tid)); run("delete from pro where user_id=?", (tid,)); run("delete from mailcfg where user_id=?", (tid,)); run("delete from mail_log where user_id=?", (tid,)); run("delete from contact_req where a=? or b=?", (tid, tid))
     run("delete from chats where kind='dm' and id in (select chat_id from chat_members where user_id=?)", (tid,))
     run("delete from chat_msgs where user_id=?", (tid,))
     run("update chats set owner=(select user_id from chat_members where chat_id=chats.id and user_id!=? limit 1) where owner=?", (tid, tid))
@@ -802,6 +808,13 @@ class H(BaseHTTPRequestHandler):
             if u: return self.go("/")
             return self.out({"/login": lambda: self.login_page(ok=g("ok")), "/register": self.register_page, "/forgot": self.forgot_page, "/reset": lambda: self.reset_page(g("t"))}[p]())
         if p == "/ws": return self.websocket(u)
+        if p == "/settings/mail" and u: return self.out(self.mail_settings(u, g("ok")))
+        if u and re.match(r"^/event/\d+/(invoice|mail)$", p):
+            try:
+                eid = int(p.split("/")[2])
+                if p.endswith("/invoice"): return self.invoice_get(u, eid)
+                return self.out(self.mail_compose(u, eid, g("ok")))
+            except (ValueError, KeyError): return self.go("/events")
         if p.startswith("/people") and u:
             try: return self.out(self.people_get(u, p, g))
             except (ValueError, KeyError, IndexError): return self.go("/people")
@@ -839,6 +852,7 @@ class H(BaseHTTPRequestHandler):
         hosts = (self.headers.get("Host"), self.headers.get("X-Forwarded-Host"))
         if sf == "cross-site" or (not sf and org not in (None, "null") and urlparse(org).netloc not in hosts): return self.out("Pedido recusado", 403, "text/plain")
         if urlparse(self.path).path == "/admin/db/restore": return self.restore()
+        if re.match(r"^/event/\d+/invoice/upload$", urlparse(self.path).path): return self.invoice_upload()
         n = int(self.headers.get("Content-Length", 0) or 0)
         self.fl = parse_qs(self.rfile.read(min(n, 700000 if self.path.endswith("/send") else 200000)).decode(), keep_blank_values=True); f = {k: v[0] for k, v in self.fl.items()}
         p = urlparse(self.path).path; parts = p.strip("/").split("/")
@@ -855,6 +869,8 @@ class H(BaseHTTPRequestHandler):
             try: return self.chat_post(u, p, parts, f)
             except (ValueError, KeyError, IndexError): return self.go("/chat")
         if parts[0] == "people": return self.people_post(u, p, f)
+        if p.startswith("/settings/mail"): return self.mail_settings_post(u, p, f)
+        if re.match(r"^/event/\d+/(invoice/delete|mail/send)$", p): return self.mail_event_post(u, p, f)
         i = u["id"]; nxt = f.get("next", "/"); nxt = nxt if nxt.startswith("/") and not nxt.startswith("//") else "/"
         if parts[0] == "toggle" and len(parts) == 3:
             r = one("select * from events where id=? and user_id=?", (parts[1], i)); t = today().isoformat()
@@ -869,12 +885,12 @@ class H(BaseHTTPRequestHandler):
         if parts[0] == "event" and len(parts) == 3 and parts[2] == "delete":
             run("delete from events where id=? and user_id=?", (parts[1], i)); return self.go("/events")
         if p == "/client/save":
-            v = tuple(f.get(k, "").strip()[:300] for k in ("name", "nif", "contact", "rate", "terms", "notes"))
+            v = tuple(f.get(k, "").strip()[:300] for k in ("name", "nif", "contact", "rate", "terms", "notes")); em = ", ".join(mailer.emails_of(f.get("email", ""))[:5])
             logo = f.get("logo", "").strip(); logo = logo if re.match(r"^https?://", logo) else ""
             if not v[0]: return self.go("/clients")
             if f.get("id") and one("select 1 from clients where id=? and user_id=?", (f["id"], i)):
-                run("update clients set name=?,nif=?,contact=?,rate=?,terms=?,notes=?,logo=? where id=? and user_id=?", v + (logo, f["id"], i))
-            else: run("insert into clients(user_id,name,nif,contact,rate,terms,notes,logo) values(?,?,?,?,?,?,?,?)", (i,) + v + (logo,))
+                run("update clients set name=?,nif=?,contact=?,rate=?,terms=?,notes=?,logo=?,email=? where id=? and user_id=?", v + (logo, em, f["id"], i))
+            else: run("insert into clients(user_id,name,nif,contact,rate,terms,notes,logo,email) values(?,?,?,?,?,?,?,?,?)", (i,) + v + (logo, em))
             return self.go("/clients")
         if parts[0] == "client" and len(parts) == 3 and parts[2] == "delete":
             run("delete from clients where id=? and user_id=?", (parts[1], i)); return self.go("/clients")
@@ -1311,7 +1327,7 @@ class H(BaseHTTPRequestHandler):
             '<datalist id="sug">' + "".join(f'<option value="{eh(tx(x))}">' for x in ("Diária", "Meia diária", "Hora extra", "Aluguer de equipamento", "Deslocação", "Edição")) + '</datalist>'
             + f'<div class="g2"><div><label>Data da fatura (vazio = por faturar)</label><input type="date" name="invoice_date" value="{e(v["invoice_date"] if v else "")}"></div><div><label>N.º da fatura</label><input name="invoice_no" value="{e(v["invoice_no"] if v else "")}"></div></div>'
             f'<label class="c" style="margin-top:14px"><input type="checkbox" name="paid" {ck(v and v["paid"])}>Fatura paga (já recebi)</label><label>Notas</label><textarea name="notes" rows="3">{e(v["notes"] if v else "")}</textarea>'
-            '<p><button class="p">Guardar</button> <a class="btn" href="/events">Cancelar</a></p></form>' + (f'<div class="card"><b>Exportar este evento</b><p class="m" style="margin:4px 0 10px">Resumo informativo (não é uma fatura).</p><a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=xlsx">Excel</a></div>' if v else "") + dele
+            '<p><button class="p">Guardar</button> <a class="btn" href="/events">Cancelar</a></p></form>' + (self.mail_card(u, v) if v else "") + (f'<div class="card"><b>Exportar este evento</b><p class="m" style="margin:4px 0 10px">Resumo informativo (não é uma fatura).</p><a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=xlsx">Excel</a></div>' if v else "") + dele
             + CUJS + '<script nonce="__NONCE__">(function(){var L=document.getElementById("items"),T=document.getElementById("tot");function tot(){var s=0;L.querySelectorAll("[name=amt]").forEach(function(i){s+=parseFloat(i.value.replace(",","."))||0});T.textContent=s.toFixed(2).replace(".","' + dsep() + '")+" €";if(window.TX)window.TX(s)}'
             'L.addEventListener("input",tot);tot();document.getElementById("add").onclick=function(){var d=document.createElement("div");d.className="it";d.innerHTML=\'<input name="label" list="sug" placeholder="' + tx("Descrição") + '"><input name="amt" inputmode="decimal" placeholder="0' + dsep() + '00">\';L.appendChild(d);d.firstChild.focus()};'
             'var S=document.getElementById("cs"),I=document.getElementById("ci");function inf(){var o=S.options[S.selectedIndex];I.textContent=o.dataset.i||"";I.hidden=!o.dataset.i}S.onchange=inf;inf();'
@@ -1362,6 +1378,7 @@ class H(BaseHTTPRequestHandler):
         exp = (f'<div class="card"><b>Exportar todos os eventos deste cliente</b><p class="m" style="margin:4px 0 10px">Para um período ou estado específico usa <a href="/export?client={v["id"]}">Exportar</a>.</p><a class="btn" href="/export/run?client={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?client={v["id"]}&fmt=xlsx">Excel</a></div>') if v else ""
         return page("Cliente", exp + f'<div class="bar-h"><h1>{"Editar" if v else "Novo"} cliente</h1>{avatar(g("name") or "?", g("logo")) if v else ""}</div><form class="f card" method="post" action="/client/save"><input type="hidden" name="id" value="{g("id")}">'
             + fld("Nome", "name", val=g("name"), extra="required") + fld("URL do logo (opcional)", "logo", "url", g("logo"), 'placeholder="https://..."') + fld("NIF", "nif", val=g("nif")) + fld("Contacto", "contact", val=g("contact"))
+            + fld("Email(s) para envio de faturas (separados por vírgula)", "email", val=g("email"), extra='maxlength="300"')
             + fld("Valores acordados (ex.: 250 €/dia)", "rate", val=g("rate")) + ta("terms", "Condições de pagamento") + ta("notes", "Notas") + '<p><button class="p">Guardar</button> <a class="btn" href="/clients">Cancelar</a></p></form>' + hist + dele, "/clients", u)
 
     # ---- calendário
@@ -1888,6 +1905,157 @@ class H(BaseHTTPRequestHandler):
             f'<div class="row2">{btn("close", "Reabrir conversa" if t["status"] == "closed" else "Fechar conversa")}{btn("delete", "Apagar conversa", "d")}</div>'), ok, err)
 
     # ---- definições
+    # ---- envio de faturas por email
+    MAIL_DEF = ("Fatura {n_fatura} – {evento}", "Olá {cliente},\n\nSegue em anexo a fatura {n_fatura} referente a {evento} ({datas}), no valor de {valor}.\n\nQualquer dúvida, estou à disposição.\n\nCumprimentos,", "{meu_nome}")
+
+    def mcfg(self, uid): return one("select * from mailcfg where user_id=?", (uid,))
+    def mready(self, c): return bool(c and c["host"] and c["pw_enc"] and c["from_email"])
+
+    def mvals(self, u, r):
+        clean = lambda t: t.replace("\u202f", " ").replace("\xa0", " "); dd = lambda x: f"{x[8:10]}/{x[5:7]}/{x[:4]}" if x else ""
+        v, w, tot = tax_of(r)
+        return {"cliente": r["cn"] or "", "evento": r["title"], "datas": dd(r["start_date"]) + ("" if r["start_date"] == r["end_date"] else " – " + dd(r["end_date"])), "n_fatura": r["invoice_no"] or "",
+                "valor": clean(eur(tot)), "valor_base": clean(eur(r["amount"] or 0)), "data_fatura": dd(r["invoice_date"]), "meu_nome": u["name"] or u["username"]}
+
+    def mail_card(self, u, v):
+        ev = v["id"]; fl = one("select name, size from invoice_files where event_id=?", (ev,)); last = one("select to_addr, created from mail_log where event_id=? and user_id=? and status='ok' order by id desc limit 1", (ev, u["id"]))
+        inv = (f'<p>📎 <a href="/event/{ev}/invoice">{e(fl["name"])}</a> <span class="m">({fl["size"] // 1024} KB)</span></p>'
+               f'<form method="post" action="/event/{ev}/invoice/delete" style="display:inline"><button class="d">Remover fatura</button></form> ' if fl else '<p class="m">Ainda não anexaste a fatura (PDF).</p>')
+        up = (f'<p><label class="btn" style="cursor:pointer">{"Substituir fatura (PDF)" if fl else "Anexar fatura (PDF)"}<input type="file" id="invf" accept="application/pdf" hidden></label> <span id="invm" class="m"></span></p>'
+              f'<script nonce="__NONCE__">document.getElementById("invf").onchange=function(){{var f=this.files[0];if(!f)return;var m=document.getElementById("invm");if(f.size>5242880){{m.textContent="Max 5 MB";return}}m.textContent="…";'
+              f'fetch("/event/{ev}/invoice/upload",{{method:"POST",headers:{{"X-Filename":encodeURIComponent(f.name),"Content-Type":"application/pdf"}},body:f}}).then(function(r){{return r.text().then(function(t){{if(r.ok)location.reload();else m.textContent=t}})}}).catch(function(){{m.textContent="⚠"}})}}</script>')
+        lg = f'<p class="m"><span>Último envio:</span> {e(last["to_addr"])} · {e(last["created"][:10])}</p>' if last else ""
+        return (f'<div class="card"><b>Enviar fatura ao cliente</b><p class="m" style="margin:4px 0 10px">Anexa a fatura que emitiste e envia-a por email ao cliente.</p>{inv}{up}{lg}'
+                f'<p><a class="btn p" href="/event/{ev}/mail">Enviar por email</a></p></div>')
+
+    def invoice_get(self, u, eid):
+        r = one("select f.* from invoice_files f join events e on e.id=f.event_id where f.event_id=? and e.user_id=?", (eid, u["id"]))
+        if not r: raise ValueError
+        self.out(bytes(r["data"]), 200, "application/pdf", (("Content-Disposition", f'attachment; filename="{r["name"]}"'), ("Cache-Control", "no-store")))
+
+    def invoice_upload(self):
+        u = self.user()
+        if not u: return self.out("Não autorizado", 401, "text/plain")
+        eid = int(urlparse(self.path).path.split("/")[2]); n = int(self.headers.get("Content-Length", 0) or 0)
+        if not one("select 1 from events where id=? and user_id=?", (eid, u["id"])): return self.out(tx("Evento inválido."), 404, "text/plain")
+        if n <= 0 or n > 5 * 1024 * 1024: return self.out(tx("Ficheiro demasiado grande (máximo 5 MB)."), 413, "text/plain")
+        data = self.rfile.read(n)
+        if not data.startswith(b"%PDF-"): return self.out(tx("Só são aceites ficheiros PDF."), 400, "text/plain")
+        nm = re.sub(r"[^\w.\- ]", "_", unquote(self.headers.get("X-Filename", "fatura.pdf")))[:80] or "fatura.pdf"
+        nm = nm if nm.lower().endswith(".pdf") else nm + ".pdf"
+        run("insert into invoice_files(event_id,name,size,data,created) values(?,?,?,?,?) on conflict(event_id) do update set name=excluded.name,size=excluded.size,data=excluded.data,created=excluded.created", (eid, nm, len(data), data, now_str()))
+        self.out("ok", 200, "text/plain")
+
+    def mail_settings(self, u, ok="", err=""):
+        c = self.mcfg(u["id"]); g = lambda k, d="": (c[k] if c and c[k] is not None else d)
+        msg = {"saved": "Configuração guardada.", "test": "Email de teste enviado para o teu email da conta."}.get(ok)
+        flash = (f'<p class="msg ok">{msg}</p>' if msg else "") + (f'<p class="msg err">{e(err)}</p>' if err else "")
+        d = self.MAIL_DEF; sub, body, sig = g("subject", tx(d[0])), g("body", tx(d[1])), g("signature", tx(d[2]))
+        sec = g("sec", "starttls"); so = lambda v, lab: f'<option value="{v}"{" selected" if sec == v else ""}>{lab}</option>'
+        chips = "".join(f'<button type="button" class="chip" data-v="{x}">{{{x}}}</button> ' for x in mailer.VARS)
+        return page("Envio de email", f'<p><a class="back" href="/settings">‹ Conta</a></p><h1>Envio de faturas por email</h1>{flash}'
+            '<p class="sub">O email sai da tua própria conta, em teu nome. O Claquete guarda a palavra-passe cifrada e só a usa para enviar o que tu confirmares.</p>'
+            '<form class="f" method="post" action="/settings/mail" id="mf"><div class="card"><h2>O meu email</h2>'
+            '<label>Fornecedor</label><select id="prov"><option value="">Outro</option><option value="gmail">Gmail</option><option value="outlook">Outlook / Hotmail</option><option value="office365">Microsoft 365</option></select>'
+            + fld("Servidor SMTP", "host", val=g("host"), extra='id="host" placeholder="smtp.exemplo.com" required maxlength="120"')
+            + '<div class="g2"><div>' + fld("Porta", "port", "number", str(g("port", 587)), 'id="port" required') + f'</div><div><label>Segurança</label><select name="sec" id="sec">{so("starttls", "STARTTLS (587)")}{so("ssl", "SSL/TLS (465)")}</select></div></div>'
+            + fld("Utilizador (normalmente o teu email)", "username", val=g("username"), extra="required maxlength='160' autocomplete='off'")
+            + f'<label>Palavra-passe</label><input name="password" type="password" autocomplete="new-password" placeholder="{"•••••••• (deixa vazio para manter)" if self.mready(c) else ""}"{"" if self.mready(c) else " required"}>'
+            '<p class="m"><b>Gmail:</b> ativa a verificação em duas etapas e cria uma «palavra-passe de aplicação» em myaccount.google.com/apppasswords. Usa essa palavra-passe aqui, não a tua normal.</p>'
+            + fld("Nome que aparece no email", "from_name", val=g("from_name", u["name"] or ""), extra='maxlength="80"') + fld("Email de envio", "from_email", "email", g("from_email", u["email"]), "required")
+            + fld("Responder para (opcional)", "reply_to", "email", g("reply_to")) + '</div>'
+            '<div class="card"><h2>Mensagem</h2><p class="m">Estas são as mensagens por omissão. Antes de cada envio podes alterar o texto. Variáveis: ' + chips + '</p>'
+            + fld("Assunto", "subject", val=sub, extra='id="subject" maxlength="200"') + f'<label>Texto</label><textarea name="body" id="body" rows="8" maxlength="3000">{e(body)}</textarea>'
+            + f'<label>Assinatura</label><textarea name="signature" rows="3" maxlength="500">{e(sig)}</textarea>'
+            f'<label class="c" style="margin-top:12px"><input type="checkbox" name="send_pdf"{" checked" if g("send_pdf", 0) else ""}>Anexar também o resumo em PDF do Claquete</label>'
+            f'<label class="c"><input type="checkbox" name="footer"{" checked" if g("footer", 1) else ""}>Mostrar «Enviado com Claquete» no fim do email</label></div>'
+            '<p><button class="p">Guardar</button></p></form>'
+            + ('<form class="f card" method="post" action="/settings/mail/test"><b>Testar</b><p class="m">Envia um email de teste para o teu email da conta, com a configuração guardada.</p><button>Enviar teste</button></form>' if self.mready(c) else "")
+            + '<script nonce="__NONCE__">var P={gmail:["smtp.gmail.com",587,"starttls"],outlook:["smtp-mail.outlook.com",587,"starttls"],office365:["smtp.office365.com",587,"starttls"]};'
+              'document.getElementById("prov").onchange=function(){var p=P[this.value];if(!p)return;host.value=p[0];port.value=p[1];sec.value=p[2]};'
+              'var last=document.getElementById("body");document.querySelectorAll("#mf .chip").forEach(function(b){b.onclick=function(){var t=document.activeElement;if(!t||(t.id!="body"&&t.id!="subject"&&t.name!="signature"))t=last;'
+              'var i=t.selectionStart||t.value.length;t.value=t.value.slice(0,i)+b.dataset.v+t.value.slice(i);t.focus()}});document.querySelectorAll("#mf textarea,#subject").forEach(function(x){x.onfocus=function(){last=x}})</script>', "/settings", u)
+
+    def mail_settings_post(self, u, p, f):
+        i = u["id"]; c = self.mcfg(i); sec_ = one("select v from kv where k='secret'")["v"]
+        if p == "/settings/mail/test":
+            if not self.mready(c): return self.go("/settings/mail")
+            try:
+                dd = dict(zip(mailer.VARS, ("Cliente Exemplo", "Evento de exemplo", "01/01/2027", "FT 2027/1", "1 230,00 €", "1 000,00 €", "02/01/2027", u["name"] or u["username"])))
+                msg = self.mail_build(u, c, [u["email"]], mailer.fill(c["subject"], dd), mailer.fill(c["body"], dd), mailer.fill(c["signature"], dd), [])
+                mailer.send(self.mail_conn(c, sec_), msg, [u["email"]]); return self.out(self.mail_settings(u, ok="test"))
+            except Exception as ex: print("ERRO teste email:", ex, flush=True); return self.out(self.mail_settings(u, err=tx(mailer.friendly(ex))))
+        try:
+            host = f.get("host", "").strip().lower()[:120]; port = int(f.get("port") or 587); sec = f.get("sec") if f.get("sec") in ("starttls", "ssl") + (("none",) if mailer.DEV else ()) else "starttls"
+            if not mailer.DEV and port not in mailer.PORTS: raise ValueError("Porta não permitida (usa 587 ou 465).")
+            if not re.match(r"^[a-z0-9.-]{3,120}$", host): raise ValueError("Servidor SMTP inválido.")
+            un = f.get("username", "").strip()[:160]; fe = f.get("from_email", "").strip()
+            if not un or not mailer.EMAIL_RE.match(fe): raise ValueError("Preenche o utilizador e um email de envio válido.")
+            pw = f.get("password", "")
+            if pw: pw_enc = mailer.enc(sec_, pw[:200])
+            elif c and c["pw_enc"]: pw_enc = c["pw_enc"]
+            else: raise ValueError("Indica a palavra-passe.")
+            rt = f.get("reply_to", "").strip(); rt = rt if mailer.EMAIL_RE.match(rt) else ""
+            v = (host, port, sec, un, pw_enc, f.get("from_name", "").strip()[:80], fe, rt, f.get("subject", "").strip()[:200], f.get("body", "").strip()[:3000], f.get("signature", "").strip()[:500], 1 if f.get("send_pdf") else 0, 1 if f.get("footer") else 0)
+        except ValueError as ex: return self.out(self.mail_settings(u, err=tx(str(ex))))
+        run("insert into mailcfg(host,port,sec,username,pw_enc,from_name,from_email,reply_to,subject,body,signature,send_pdf,footer,user_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(user_id) do update set "
+            "host=excluded.host,port=excluded.port,sec=excluded.sec,username=excluded.username,pw_enc=excluded.pw_enc,from_name=excluded.from_name,from_email=excluded.from_email,reply_to=excluded.reply_to,"
+            "subject=excluded.subject,body=excluded.body,signature=excluded.signature,send_pdf=excluded.send_pdf,footer=excluded.footer", v + (i,))
+        return self.go("/settings/mail?ok=saved")
+
+    def mail_conn(self, c, sec_):
+        return {"from_email": c["from_email"], "host": c["host"], "port": c["port"], "sec": c["sec"], "username": c["username"], "password": mailer.dec(sec_, c["pw_enc"]) or ""}
+
+    def mail_build(self, u, c, to, subject, body, sig, atts):
+        cf = cfg(); ft = tx("Enviado com Claquete") if c["footer"] else ""
+        return mailer.build({"from_name": c["from_name"], "from_email": c["from_email"], "reply_to": c["reply_to"]}, to, subject, body, sig, cf["c_brand"], cf["site_name"], ft, atts)
+
+    def mail_compose(self, u, eid, ok=""):
+        r = one(EV + "where e.id=? and e.user_id=?", (eid, u["id"]))
+        if not r: raise ValueError
+        c = self.mcfg(u["id"]); back = f'<p><a class="back" href="/event/{eid}">‹ {e(r["title"])}</a></p><h1>Enviar fatura por email</h1>'
+        cl = one("select * from clients where id=? and user_id=?", (r["client_id"], u["id"])) if r["client_id"] else None; to = mailer.emails_of(cl["email"]) if cl and cl["email"] else []
+        if not self.mready(c): return page("Enviar", back + '<p class="msg err">Ainda não ligaste o teu email.</p><p><a class="btn p" href="/settings/mail">Configurar envio de email</a></p>', "/events", u)
+        if not to: return page("Enviar", back + '<p class="msg err">Este evento não tem cliente com email guardado.</p>' + (f'<p><a class="btn p" href="/client/{cl["id"]}">Adicionar email ao cliente</a></p>' if cl else f'<p><a class="btn p" href="/event/{eid}">Escolher cliente no evento</a></p>'), "/events", u)
+        fl = one("select name from invoice_files where event_id=?", (eid,)); vals = self.mvals(u, r)
+        sub = mailer.fill(c["subject"] or tx(self.MAIL_DEF[0]), vals); body = mailer.fill(c["body"] or tx(self.MAIL_DEF[1]), vals); sig = mailer.fill(c["signature"] or "", vals)
+        hist = rows("select to_addr, status, error, created from mail_log where event_id=? and user_id=? order by id desc limit 5", (eid, u["id"]))
+        hl = "".join(f'<li>{e(h["created"][:16])} · {e(h["to_addr"])} · {eh("enviado") if h["status"] == "ok" else eh("falhou")}</li>' for h in hist)
+        msg = f'<p class="msg ok">{eh("Email enviado.")}</p>' if ok == "sent" else ""
+        rc = "".join(f'<label class="c"><input type="checkbox" name="to" value="{e(x)}" checked>{e(x)}</label>' for x in to)
+        return page("Enviar", back + msg + '<form class="f card" method="post" action="/event/' + str(eid) + '/mail/send"><label>Para</label>' + rc
+            + fld("Assunto", "subject", val=sub, extra='maxlength="200" required') + f'<label>Mensagem</label><textarea name="body" rows="10" maxlength="3000" required>{e(body + (chr(10) * 2 + sig if sig else ""))}</textarea>'
+            + '<label>Anexos</label>'
+            + (f'<label class="c"><input type="checkbox" name="att_inv" checked>{eh("Fatura")}: {e(fl["name"])}</label>' if fl else f'<p class="m">{eh("Não anexaste a fatura a este evento.")} <a href="/event/{eid}">{eh("Anexar")}</a></p>')
+            + f'<label class="c"><input type="checkbox" name="att_pdf"{" checked" if c["send_pdf"] else ""}>{eh("Resumo em PDF do Claquete")}</label>'
+            + '<p class="m">Vais enviar este email em teu nome. Confirma o destinatário e os anexos.</p><p><button class="p">Enviar email</button> <a class="btn" href="/event/' + str(eid) + '">Cancelar</a></p></form>'
+            + (f'<h2>Envios deste evento</h2><ul class="m">{hl}</ul>' if hl else ""), "/events", u)
+
+    def mail_event_post(self, u, p, f):
+        i = u["id"]; eid = int(p.split("/")[2]); r = one(EV + "where e.id=? and e.user_id=?", (eid, i))
+        if not r: return self.go("/events")
+        if p.endswith("/invoice/delete"): run("delete from invoice_files where event_id=?", (eid,)); return self.go(f"/event/{eid}")
+        c = self.mcfg(i); cl = one("select * from clients where id=? and user_id=?", (r["client_id"], i)) if r["client_id"] else None
+        allowed = mailer.emails_of(cl["email"]) if cl and cl["email"] else []; to = [x for x in self.fl.get("to", []) if x in allowed]
+        def fail(m): return self.out(page("Enviar", f'<p><a class="back" href="/event/{eid}/mail">‹ Voltar</a></p><p class="msg err">{e(tx(m))}</p>', "/events", u))
+        if not self.mready(c) or not to: return fail("Escolhe pelo menos um destinatário do cliente.")
+        if one("select count(*) from mail_log where user_id=? and status='ok' and created>?", (i, (dt.datetime.now() - dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")))[0] >= 30: return fail("Atingiste o limite de envios por hora. Tenta mais tarde.")
+        atts = []; fl = one("select name, data from invoice_files where event_id=?", (eid,))
+        if f.get("att_inv") and fl: atts.append((fl["name"], bytes(fl["data"])))
+        if f.get("att_pdf"):
+            try: atts.append((f"claquete-resumo-{eid}.pdf", export.pdf_event(self.export_doc(u, {"scope": "event", "id": eid}))))
+            except Exception as ex: print("ERRO PDF resumo:", ex, flush=True)
+        if not atts: return fail("Anexa a fatura ao evento ou escolhe o resumo em PDF.")
+        sub, body = f.get("subject", "").strip()[:200], f.get("body", "").strip()[:3000]
+        if not sub or not body: return fail("Preenche o assunto e a mensagem.")
+        try:
+            msg = self.mail_build(u, c, to, sub, body, "", atts); mailer.send(self.mail_conn(c, one("select v from kv where k='secret'")["v"]), msg, to)
+            st, er = "ok", ""
+        except Exception as ex: print("ERRO envio fatura:", ex, flush=True); st, er = "erro", mailer.friendly(ex)
+        run("insert into mail_log(user_id,event_id,to_addr,subject,status,error,created) values(?,?,?,?,?,?,?)", (i, eid, ", ".join(to), sub, st, er, dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        if st != "ok": return fail(er)
+        return self.go(f"/event/{eid}/mail?ok=sent")
+
     # ---- rede de freelancers AV
     def pro_of(self, uid): return one("select * from pro where user_id=?", (uid,))
 
@@ -2142,6 +2310,7 @@ class H(BaseHTTPRequestHandler):
             + fld("Nome", "name", val=u["name"], extra="required") + fld("Email", "email", "email", u["email"], "required") + fld("Telemóvel", "phone", "tel", u["phone"] or "")
             + f'<p class="m">Utilizador: <b>{e(u["username"])}</b></p><p><button class="p">Guardar dados</button></p></form>'
             + '<div class="card"><h2>Perfil profissional</h2><p class="m">Aparece na rede AV Freelancers para outros colegas te encontrarem. Só fica visível se tu quiseres.</p><p><a class="btn" href="/people/me">Editar perfil profissional</a></p></div>'
+            + '<div class="card"><h2>Envio de faturas por email</h2><p class="m">Liga o teu email e envia a fatura ao cliente diretamente a partir do evento, com uma mensagem tua.</p><p><a class="btn" href="/settings/mail">Configurar envio de email</a></p></div>'
             + self.theme_card(u) + self.tax_card(u) +
             '<div class="card" id="pwa"><h2>Instalar como aplicação</h2><p class="m">Usa o site como uma app no telemóvel: ícone no ecrã principal, ecrã inteiro e avisos.</p>'
             '<p><button type="button" class="p" id="pwab" hidden>Instalar app</button></p>'
