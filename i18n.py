@@ -878,6 +878,11 @@ P += [
     ('Preenche o servidor, a porta e o utilizador.', 'Fill in the server, port and username.', 'Rellena el servidor, el puerto y el usuario.', 'Renseignez le serveur, le port et l’identifiant.', 'Compila server, porta e utente.'),
     ('O email de envio não é válido.', 'The sending email is not valid.', 'El email de envío no es válido.', 'L’e-mail d’envoi n’est pas valide.', 'L’email di invio non è valida.'),
 ]
+P += [
+    ('Por realizar', 'Upcoming', 'Por realizar', 'À venir', 'Da svolgere'),
+    ('Ver todos ›', 'See all ›', 'Ver todos ›', 'Tout voir ›', 'Vedi tutti ›'),
+    ('Sem eventos por realizar.', 'No upcoming events.', 'Sin eventos por realizar.', 'Aucun événement à venir.', 'Nessun evento da svolgere.'),
+]
 # --- e-mails (pt, en, es, fr, it) com {marcadores}
 MAIL = {
     "welcome_s": ("Bem-vindo à {site}", "Welcome to {site}", "Bienvenido a {site}", "Bienvenue sur {site}", "Benvenuto su {site}"),

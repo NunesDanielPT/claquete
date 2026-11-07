@@ -72,3 +72,6 @@ Definições → Envio de faturas por email: cada utilizador liga o seu SMTP (Gm
 
 ## Email do sistema no painel
 Admin → Email: servidor, porta, segurança, utilizador, palavra-passe (cifrada) e endereço do remetente, com botão de teste. O que for guardado aí tem prioridade sobre `SMTP_USER`/`SMTP_PASSWORD` do Portainer; «Voltar às variáveis do Portainer» apaga a configuração do painel.
+
+## Estados dos eventos
+**Por realizar** (ainda não terminaram: data de fim posterior a hoje e sem fatura) → **Por faturar** (já terminaram e não têm fatura) → **Faturada** → **Paga**. Um evento só entra em «Por faturar» a partir do dia em que termina. Há um separador «Por realizar» na página Eventos e a mesma opção no filtro de exportação.
