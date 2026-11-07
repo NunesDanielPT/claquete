@@ -904,6 +904,7 @@ P += [
     ('Mostrar o cartão do Claquete e «Enviado com Claquete» no fim do email', 'Show the Claquete card and “Sent with Claquete” at the end of the email', 'Mostrar la tarjeta de Claquete y «Enviado con Claquete» al final del email', 'Afficher la carte Claquete et « Envoyé avec Claquete » à la fin de l’e-mail', 'Mostra la scheda di Claquete e «Inviato con Claquete» alla fine dell’email'),
     ('Repor o texto sugerido (assunto, mensagem e assinatura)', 'Reset to the suggested text (subject, message and signature)', 'Restablecer el texto sugerido (asunto, mensaje y firma)', 'Rétablir le texte suggéré (objet, message et signature)', 'Ripristina il testo suggerito (oggetto, messaggio e firma)'),
 ]
+P += [("Fatura de","Invoice from","Factura de","Facture de","Fattura di")]
 # --- e-mails (pt, en, es, fr, it) com {marcadores}
 MAIL = {
     "welcome_s": ("Bem-vindo à {site}", "Welcome to {site}", "Bienvenido a {site}", "Bienvenue sur {site}", "Benvenuto su {site}"),
