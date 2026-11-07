@@ -857,6 +857,27 @@ P += [
     ('Enviar email', 'Send email', 'Enviar email', 'Envoyer l’e-mail', 'Invia email'),
     ('Envios deste evento', 'Sends for this event', 'Envíos de este evento', 'Envois pour cet événement', 'Invii per questo evento'),
 ]
+P += [
+    ('Email', 'Email', 'Email', 'E-mail', 'Email'),
+    ('Email do sistema guardado.', 'System email saved.', 'Email del sistema guardado.', 'E-mail du système enregistré.', 'Email di sistema salvata.'),
+    ('Email de teste enviado para o teu email de administrador.', 'Test email sent to your administrator email.', 'Email de prueba enviado a tu email de administrador.', 'E-mail de test envoyé à votre e-mail d’administrateur.', 'Email di prova inviata alla tua email di amministratore.'),
+    ('Voltou a usar as variáveis do Portainer.', 'Back to using the Portainer variables.', 'Se vuelven a usar las variables de Portainer.', 'Retour aux variables de Portainer.', 'Si usano di nuovo le variabili di Portainer.'),
+    ('guardado aqui, no painel', 'saved here, in the panel', 'guardado aquí, en el panel', 'enregistré ici, dans le panneau', 'salvato qui, nel pannello'),
+    ('variáveis do Portainer (SMTP_USER / SMTP_PASSWORD)', 'Portainer variables (SMTP_USER / SMTP_PASSWORD)', 'variables de Portainer (SMTP_USER / SMTP_PASSWORD)', 'variables Portainer (SMTP_USER / SMTP_PASSWORD)', 'variabili di Portainer (SMTP_USER / SMTP_PASSWORD)'),
+    ('A usar:', 'Using:', 'Usando:', 'Utilisation :', 'In uso:'),
+    ('O envio de emails está desligado.', 'Email sending is turned off.', 'El envío de emails está desactivado.', 'L’envoi d’e-mails est désactivé.', 'L’invio di email è disattivato.'),
+    ('Email do sistema', 'System email', 'Email del sistema', 'E-mail du système', 'Email di sistema'),
+    ('É o email que o Claquete usa para as boas-vindas, a recuperação de palavra-passe e as respostas do suporte. O que guardares aqui tem prioridade sobre as variáveis do Portainer.', 'This is the email Claquete uses for welcome messages, password recovery and support replies. What you save here takes priority over the Portainer variables.', 'Es el email que Claquete usa para la bienvenida, la recuperación de contraseña y las respuestas de soporte. Lo que guardes aquí tiene prioridad sobre las variables de Portainer.', 'C’est l’e-mail que Claquete utilise pour la bienvenue, la récupération de mot de passe et les réponses du support. Ce que vous enregistrez ici a priorité sur les variables Portainer.', 'È l’email che Claquete usa per il benvenuto, il recupero password e le risposte del supporto. Ciò che salvi qui ha priorità sulle variabili di Portainer.'),
+    ('Utilizador (o email de envio)', 'Username (the sending email)', 'Usuario (el email de envío)', 'Identifiant (l’e-mail d’envoi)', 'Utente (l’email di invio)'),
+    ('Endereço do remetente (opcional, por omissão o utilizador)', 'Sender address (optional, defaults to the username)', 'Dirección del remitente (opcional, por defecto el usuario)', 'Adresse de l’expéditeur (facultatif, par défaut l’identifiant)', 'Indirizzo del mittente (facoltativo, di default l’utente)'),
+    ('Com um domínio teu, usa o SMTP do fornecedor do domínio (ou do teu serviço de email) e põe aqui o endereço, por exemplo', 'With your own domain, use the SMTP of your domain provider (or email service) and put the address here, for example', 'Con un dominio propio, usa el SMTP del proveedor del dominio (o de tu servicio de email) y pon aquí la dirección, por ejemplo', 'Avec votre propre domaine, utilisez le SMTP de votre hébergeur (ou service d’e-mail) et indiquez ici l’adresse, par exemple', 'Con un tuo dominio, usa l’SMTP del fornitore del dominio (o del tuo servizio email) e inserisci qui l’indirizzo, ad esempio'),
+    ('No Gmail usa uma «palavra-passe de aplicação».', 'With Gmail use an “app password”.', 'En Gmail usa una «contraseña de aplicación».', 'Avec Gmail, utilisez un « mot de passe d’application ».', 'Con Gmail usa una «password per le app».'),
+    ('Testar', 'Test', 'Probar', 'Tester', 'Prova'),
+    ('Envia um email de teste para o teu email de administrador.', 'Sends a test email to your administrator email.', 'Envía un email de prueba a tu email de administrador.', 'Envoie un e-mail de test à votre e-mail d’administrateur.', 'Invia un’email di prova alla tua email di amministratore.'),
+    ('Voltar às variáveis do Portainer', 'Back to Portainer variables', 'Volver a las variables de Portainer', 'Revenir aux variables Portainer', 'Torna alle variabili di Portainer'),
+    ('Preenche o servidor, a porta e o utilizador.', 'Fill in the server, port and username.', 'Rellena el servidor, el puerto y el usuario.', 'Renseignez le serveur, le port et l’identifiant.', 'Compila server, porta e utente.'),
+    ('O email de envio não é válido.', 'The sending email is not valid.', 'El email de envío no es válido.', 'L’e-mail d’envoi n’est pas valide.', 'L’email di invio non è valida.'),
+]
 # --- e-mails (pt, en, es, fr, it) com {marcadores}
 MAIL = {
     "welcome_s": ("Bem-vindo à {site}", "Welcome to {site}", "Bienvenido a {site}", "Bienvenue sur {site}", "Benvenuto su {site}"),

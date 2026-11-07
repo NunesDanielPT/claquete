@@ -309,18 +309,34 @@ def session_cookie(u, secure):
 
 # Email: por omissao usa o Gmail. Basta definir SMTP_USER (o teu Gmail) e SMTP_PASSWORD (palavra-passe de app).
 # NUNCA escrevas a palavra-passe aqui no codigo: o repositorio e publico. Define-a nas variaveis do Portainer.
-def smtp_ready(): return bool(os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"))
+def smtp_conf():
+    """Email do sistema: o que o admin guardou no painel tem prioridade; senão as variáveis do Portainer."""
+    k = {r["k"][5:]: r["v"] for r in rows("select k, v from kv where k like 'smtp.%'")}
+    if k.get("user") and k.get("pw"):
+        sec = one("select v from kv where k='secret'")
+        pw = mailer.dec(sec["v"], k["pw"]) if sec else None
+        if pw: return {"src": "db", "host": k.get("host") or "smtp.gmail.com", "port": int(k.get("port") or 587), "sec": k.get("sec") or "starttls", "user": k["user"], "pw": pw, "frm": k.get("from") or k["user"]}
+    if os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"):
+        port = int(os.environ.get("SMTP_PORT") or 587)
+        return {"src": "env", "host": os.environ.get("SMTP_HOST") or "smtp.gmail.com", "port": port, "sec": "ssl" if port == 465 else "starttls", "user": os.environ["SMTP_USER"], "pw": os.environ["SMTP_PASSWORD"], "frm": os.environ.get("SMTP_FROM") or os.environ["SMTP_USER"]}
+    return None
 
-def send_mail(to, subject, body):
+def smtp_ready(): return smtp_conf() is not None
+
+def send_mail(to, subject, body, strict=False):
     try:
-        user = os.environ["SMTP_USER"]; m = EmailMessage()
-        m["From"] = formataddr((SN(), os.environ.get("SMTP_FROM") or user)); m["To"] = to; m["Subject"] = subject; m.set_content(body)
-        h, port = os.environ.get("SMTP_HOST") or "smtp.gmail.com", int(os.environ.get("SMTP_PORT") or 587); ctx = ssl.create_default_context()
-        if port == 465: s = smtplib.SMTP_SSL(h, port, timeout=20, context=ctx)
-        else: s = smtplib.SMTP(h, port, timeout=20); s.starttls(context=ctx)
-        s.login(user, os.environ["SMTP_PASSWORD"]); s.send_message(m); s.quit()
+        c = smtp_conf(); m = EmailMessage()
+        m["From"] = formataddr((SN(), c["frm"])); m["To"] = to; m["Subject"] = subject; m.set_content(body)
+        ctx = ssl.create_default_context()
+        if c["sec"] == "ssl": s = smtplib.SMTP_SSL(c["host"], c["port"], timeout=20, context=ctx)
+        else:
+            s = smtplib.SMTP(c["host"], c["port"], timeout=20)
+            if c["sec"] != "none" or not mailer.DEV: s.starttls(context=ctx)
+        s.login(c["user"], c["pw"]); s.send_message(m, from_addr=c["frm"]); s.quit()
         print(f"Email enviado: {subject} -> {to}", flush=True)
-    except Exception as ex: print("ERRO SMTP:", ex, flush=True)
+    except Exception as ex:
+        print("ERRO SMTP:", ex, flush=True)
+        if strict: raise
 
 def mail_async(to, subject, body):
     if smtp_ready(): threading.Thread(target=send_mail, args=(to, subject, body), daemon=True).start()
@@ -1001,9 +1017,9 @@ class H(BaseHTTPRequestHandler):
         self.out(json.dumps(m, ensure_ascii=False), 200, "application/manifest+json", (("Cache-Control", "public, max-age=3600"),))
 
     # ---- admin
-    TABS = [("/admin", "Resumo"), ("/admin/users", "Utilizadores"), ("/admin/site", "Site"), ("/admin/ads", "Publicidade"), ("/admin/news", "Novidades"), ("/admin/support", "Suporte"), ("/admin/db", "Base de dados")]
+    TABS = [("/admin", "Resumo"), ("/admin/users", "Utilizadores"), ("/admin/site", "Site"), ("/admin/email", "Email"), ("/admin/ads", "Publicidade"), ("/admin/news", "Novidades"), ("/admin/support", "Suporte"), ("/admin/db", "Base de dados")]
     FLASH = {"texts": "Textos e registo guardados.", "colors": "Cores guardadas.", "reset": "Cores repostas.", "ads": "Publicidade guardada.", "user": "Dados guardados.",
-             "pw": "Palavra-passe definida. A pessoa tem de entrar de novo.", "ics": "Link do calendário renovado.", "state": "Estado atualizado.", "snap": "Backup criado.", "newadmin": "Administrador adicionado.",
+             "pw": "Palavra-passe definida. A pessoa tem de entrar de novo.", "ics": "Link do calendário renovado.", "state": "Estado atualizado.", "mailsaved": "Email do sistema guardado.", "mailtest": "Email de teste enviado para o teu email de administrador.", "mailreset": "Voltou a usar as variáveis do Portainer.", "snap": "Backup criado.", "newadmin": "Administrador adicionado.",
              "reply": "Resposta enviada.", "closed": "Conversa fechada.", "reopened": "Conversa reaberta.", "deleted": "Conversa apagada.",
              "newspub": "Novidade publicada.", "newsdel": "Novidade apagada.", "bulkdel": "Contas apagadas.", "nosel": "Seleciona pelo menos uma conta e marca a confirmação.", "nouser": "Não encontrámos essa conta (ou já é administradora)."}
 
@@ -1023,6 +1039,7 @@ class H(BaseHTTPRequestHandler):
         if p == "/admin": return self.out(self.a_home(u))
         if p == "/admin/users": return self.out(self.a_users(u, g("ok")))
         if p == "/admin/site": return self.out(self.a_site(u, g("ok")))
+        if p == "/admin/email": return self.out(self.a_email(u, g("ok")))
         if p == "/admin/ads": return self.out(self.a_ads(u, g("ok")))
         if p == "/admin/db": return self.out(self.a_db(u, g("ok"), g("t")))
         if p == "/admin/support": return self.out(self.a_support(u, g("f", "open"), g("ok")))
@@ -1094,6 +1111,26 @@ class H(BaseHTTPRequestHandler):
             f'<details><summary>Apagar conta e todos os dados</summary><form class="f" method="post" action="{base}/delete"><p class="m">Apaga a conta e os dados associados: {pl(ne, "evento")} · {pl(nc, "cliente")}. Não dá para desfazer (só com um backup). '
             f'Escreve <b>{e(t["username"])}</b> para confirmar.</p><input name="confirm" autocomplete="off" required><p><button class="d">Apagar definitivamente</button></p></form></details>'), ok, err)
 
+    def a_email(self, u, ok="", err=""):
+        c = smtp_conf(); src = {"db": "guardado aqui, no painel", "env": "variáveis do Portainer (SMTP_USER / SMTP_PASSWORD)"}.get(c["src"]) if c else None
+        k = {r["k"][5:]: r["v"] for r in rows("select k, v from kv where k like 'smtp.%'")}; g = lambda x, d="": k.get(x) or d
+        sec = g("sec", "starttls"); so = lambda v, lab: f'<option value="{v}"{" selected" if sec == v else ""}>{lab}</option>'
+        st = (f'<p class="msg ok"><span>A usar:</span> {eh(src)} · <b>{e(c["user"])}</b></p>' if c else '<p class="msg err">O envio de emails está desligado.</p>')
+        return self.apage(u, "/admin/email", st + '<form class="f card" method="post" action="/admin/email/save"><h2>Email do sistema</h2>'
+            '<p class="m">É o email que o Claquete usa para as boas-vindas, a recuperação de palavra-passe e as respostas do suporte. O que guardares aqui tem prioridade sobre as variáveis do Portainer.</p>'
+            '<label>Fornecedor</label><select id="prov"><option value="">Outro</option><option value="gmail">Gmail</option><option value="outlook">Outlook / Hotmail</option><option value="office365">Microsoft 365</option></select>'
+            + fld("Servidor SMTP", "host", val=g("host", "smtp.gmail.com"), extra='id="host" required maxlength="120"')
+            + '<div class="g2"><div>' + fld("Porta", "port", "number", str(g("port", 587)), 'id="port" required') + f'</div><div><label>Segurança</label><select name="sec" id="sec">{so("starttls", "STARTTLS (587)")}{so("ssl", "SSL/TLS (465)")}</select></div></div>'
+            + fld("Utilizador (o email de envio)", "user", val=g("user"), extra='required maxlength="160" autocomplete="off"')
+            + f'<label>Palavra-passe</label><input name="password" type="password" autocomplete="new-password" placeholder="{"•••••••• (deixa vazio para manter)" if k.get("pw") else ""}"{"" if k.get("pw") else " required"}>'
+            + fld("Endereço do remetente (opcional, por omissão o utilizador)", "from", "email", g("from"), 'placeholder="geral@o-teu-dominio.pt"')
+            + '<p class="m">Com um domínio teu, usa o SMTP do fornecedor do domínio (ou do teu serviço de email) e põe aqui o endereço, por exemplo <b>geral@claquete.pt</b>. No Gmail usa uma «palavra-passe de aplicação».</p>'
+            '<p><button class="p">Guardar</button></p></form>'
+            + ('<div class="card"><h2>Testar</h2><p class="m">Envia um email de teste para o teu email de administrador.</p><form method="post" action="/admin/email/test" style="display:inline"><button>Enviar teste</button></form> '
+               + ('<form method="post" action="/admin/email/reset" style="display:inline"><button class="d">Voltar às variáveis do Portainer</button></form>' if k.get("pw") else "") + '</div>' if c else "")
+            + '<script nonce="__NONCE__">var P={gmail:["smtp.gmail.com",587,"starttls"],outlook:["smtp-mail.outlook.com",587,"starttls"],office365:["smtp.office365.com",587,"starttls"]};'
+              'document.getElementById("prov").onchange=function(){var p=P[this.value];if(!p)return;host.value=p[0];port.value=p[1];sec.value=p[2]}</script>', ok, err)
+
     def a_site(self, u, ok=""):
         c = cfg(); ck = lambda k: "checked" if c[k] == "1" else ""
         lopts = "".join(f'<option value="{k}"{" selected" if cfg()["lang"] == k else ""}>{v}</option>' for k, v in i18n.LANGS.items())
@@ -1157,6 +1194,27 @@ class H(BaseHTTPRequestHandler):
     def admin_post(self, u, p, parts, f):
         if not u["is_admin"]: return self.out(page("Não encontrado", "<h1>Página não encontrada</h1>", "", u), 404)
         yes = lambda k: "1" if f.get(k) else "0"
+        if p.startswith("/admin/email/"):
+            sec_ = one("select v from kv where k='secret'")["v"]; kvset = lambda k, v: run("insert into kv values(?,?) on conflict(k) do update set v=excluded.v", ("smtp." + k, v))
+            if p == "/admin/email/reset": run("delete from kv where k like 'smtp.%'"); return self.go("/admin/email?ok=mailreset")
+            if p == "/admin/email/test":
+                try:
+                    if not smtp_ready(): raise ValueError("O envio de emails está desligado.")
+                    send_mail(u["email"], f"{SN()}: teste de email", "Se estás a ler isto, o email do sistema está a funcionar.", strict=True); return self.go("/admin/email?ok=mailtest")
+                except Exception as ex: return self.out(self.a_email(u, err=f"Não foi possível enviar: {ex}"))
+            if p == "/admin/email/save":
+                host = f.get("host", "").strip().lower()[:120]; user = f.get("user", "").strip()[:160]; frm = f.get("from", "").strip()[:160]
+                try: port = int(f.get("port") or 587)
+                except ValueError: port = 0
+                old = {r["k"][5:]: r["v"] for r in rows("select k, v from kv where k like 'smtp.%'")}
+                if not re.match(r"^[a-z0-9.-]{3,120}$", host) or not 1 <= port <= 65535 or not user: return self.out(self.a_email(u, err="Preenche o servidor, a porta e o utilizador."))
+                if frm and not mailer.EMAIL_RE.match(frm): return self.out(self.a_email(u, err="O email de envio não é válido."))
+                pw = f.get("password", "")
+                if pw: pw_enc = mailer.enc(sec_, pw[:200])
+                elif old.get("pw"): pw_enc = old["pw"]
+                else: return self.out(self.a_email(u, err="Indica a palavra-passe."))
+                for k_, v_ in (("host", host), ("port", str(port)), ("sec", f.get("sec") if f.get("sec") in ("ssl", "none") and (f.get("sec") == "ssl" or mailer.DEV) else "starttls"), ("user", user), ("from", frm), ("pw", pw_enc)): kvset(k_, v_)
+                return self.go("/admin/email?ok=mailsaved")
         if p == "/admin/site/texts":
             set_cfg({"site_name": f.get("site_name", "").strip()[:40] or DEFAULTS["site_name"], "hero_title": f.get("hero_title", "").strip()[:140] or DEFAULTS["hero_title"],
                      "hero_text": f.get("hero_text", "").strip()[:300] or DEFAULTS["hero_text"], "reg_open": yes("reg_open"), "invite": f.get("invite", "").strip()[:60], "lang": f.get("lang") if f.get("lang") in i18n.LANGS else "pt"})

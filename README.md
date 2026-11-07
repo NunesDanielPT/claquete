@@ -69,3 +69,6 @@ Perfil profissional opcional (Definições → Perfil profissional, ou menu AV F
 
 ## Envio de faturas por email
 Definições → Envio de faturas por email: cada utilizador liga o seu SMTP (Gmail com palavra-passe de aplicação, Outlook, etc.), define a mensagem por omissão e envia a partir do evento (anexa o PDF da fatura emitida e, opcionalmente, o resumo do Claquete). A palavra-passe fica cifrada na base de dados (chave derivada do segredo interno). Só se envia para os emails guardados na ficha do cliente, com limite de 30 envios por hora por utilizador. As faturas anexadas ficam na base de dados (incluídas nas cópias de segurança). O servidor tem de poder sair para as portas 587/465. Lógica em `mailer.py`.
+
+## Email do sistema no painel
+Admin → Email: servidor, porta, segurança, utilizador, palavra-passe (cifrada) e endereço do remetente, com botão de teste. O que for guardado aí tem prioridade sobre `SMTP_USER`/`SMTP_PASSWORD` do Portainer; «Voltar às variáveis do Portainer» apaga a configuração do painel.
