@@ -2071,15 +2071,15 @@ class H(BaseHTTPRequestHandler):
 
     def mail_build(self, u, c, to, subject, body, sig, atts, r=None, vals=None, iban_on=True):
         cf = cfg(); v = vals or {}; site_url = BASE_URL or ""; dd = lambda k: v.get(k, "")
-        name = c["from_name"] or u["name"] or u["username"]; reach = c["reply_to"] or c["from_email"]
+        name = u["name"] or u["username"]; reach = c["reply_to"] or c["from_email"]
         card = [(tx("Evento"), dd("evento")), (tx("Datas"), dd("datas")), (tx("Fatura n.º"), dd("n_fatura")), (tx("Data da fatura"), dd("data_fatura"))]
         card = [x for x in card if x[1]]
         contact = [(tx("Email"), reach, "mailto:" + reach)] + ([(tx("Telemóvel"), u["phone"], "tel:" + re.sub(r"[^\d+]", "", u["phone"]))] if u["phone"] else [])
         ib = re.sub(r"\s", "", u["iban"] or ""); ibn = (" ".join(ib[i:i + 4] for i in range(0, len(ib), 4)), name) if ib and iban_on else None
         promo = ({"title": tx("Também és freelancer de audiovisual?"), "text": tx("O Claquete organiza os teus eventos, clientes e o estado das faturas num só sítio: calendário, estatísticas, exportação em PDF e Excel, e uma rede para falares com outros profissionais. Gratuito e feito por um freelancer português."),
                   "button": tx("Conhecer o Claquete"), "url": site_url or "https://claquete.pt"} if c["footer"] else None)
-        ctx = {"brand": cf["c_brand"], "site": cf["site_name"], "logo": png_icon(96, tuple(cf[k] for k in COLOR_KEYS)) if promo else None, "header_name": name,
-               "header_sub": tx("Fatura") + (" " + dd("n_fatura") if dd("n_fatura") else ""), "preheader": tx("Fatura em anexo") + (" · " + dd("evento") if dd("evento") else "") + " · " + name,
+        ctx = {"brand": cf["c_brand"], "site": cf["site_name"], "logo": png_icon(96, tuple(cf[k] for k in COLOR_KEYS)) if promo else None, "header_name": tx("Fatura de") + " " + name,
+               "header_sub": (tx("Fatura n.º") + " " + dd("n_fatura")) if dd("n_fatura") else tx("Fatura"), "preheader": tx("Fatura em anexo") + (" · " + dd("evento") if dd("evento") else "") + " · " + name,
                "card": card, "total": (tx("Total a pagar"), dd("valor")) if dd("valor") else None, "contact_title": tx("Contacto"), "contact": contact,
                "pay_title": tx("Dados para pagamento"), "iban": (tx("IBAN"), ibn[0], ibn[1]) if ibn else None, "promo": promo,
                "footer": (tx("Enviado com Claquete") + (" · " + site_url.replace("https://", "").replace("http://", "") if site_url else "")) if c["footer"] else ""}
