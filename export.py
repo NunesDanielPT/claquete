@@ -198,7 +198,7 @@ def xlsx(sheets, brand="#3b4cdb", logo_png=None):
 
 # ---------------------------------------------------------------- documentos
 GREY, LIGHT, INK, MUT = "#e2e6eb", "#f1f3f6", "#12161c", "#67717e"
-ST_COL = {"todo": "#d1343a", "inv": "#b9770e", "paid": "#1f8a58"}
+ST_COL = {"plan": "#5f6b8a", "todo": "#d1343a", "inv": "#b9770e", "paid": "#1f8a58"}
 
 def _footer(doc):
     def f(p, i, n):

@@ -369,7 +369,7 @@ button.d{color:var(--todo)}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bot
 .st b{display:block;font-size:1.6rem;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:2px}.st span{color:var(--mut);font-size:.85rem}
 .list{background:var(--sf);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}.list>.empty{padding:18px;color:var(--mut)}
 .er{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 14px;border-top:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c,transparent)}
-.er:first-child{border-top:0}.todo{--c:var(--todo)}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
+.er:first-child{border-top:0}.todo{--c:var(--todo)}.plan{--c:#5f6b8a}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
 .eh{display:flex;gap:12px;align-items:center;text-decoration:none;min-width:0;flex:1}.eh b{display:block;font-weight:620}.eh small{color:var(--mut);display:block;font-size:.85rem}
 .eh>div{min-width:0}.ea{display:flex;align-items:center;gap:12px;justify-content:flex-end}.amt{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
 .late{color:var(--todo);font-style:normal;font-weight:600}
@@ -748,7 +748,7 @@ def fld(label, name, typ="text", val="", extra=""):
 
 # ---------------------------------------------------------------- componentes
 EV = "select e.*, c.name cn, c.logo cl from events e left join clients c on c.id=e.client_id "
-def state(r): return "paid" if r["paid"] else "inv" if r["invoice_date"] else "todo"
+def state(r): return "paid" if r["paid"] else "inv" if r["invoice_date"] else "plan" if r["end_date"] > today().isoformat() else "todo"
 
 def avatar(name, logo):
     if logo: return f'<img class="av" src="{e(logo)}" alt="" referrerpolicy="no-referrer" loading="lazy">'
@@ -1339,9 +1339,10 @@ class H(BaseHTTPRequestHandler):
     # ---- início
     def home(self, u, m):
         first, prev, nxt = month_nav(m); ym = first.strftime("%Y-%m"); i = u["id"]; mn = MES[first.month - 1]
-        a = rows(EV + "where e.user_id=? and e.invoice_date is null order by e.start_date", (i,))
+        td = today().isoformat()
+        a = rows(EV + "where e.user_id=? and e.invoice_date is null and e.end_date<=? order by e.start_date", (i, td))
         b = rows(EV + "where e.user_id=? and e.invoice_date is not null and e.paid=0 order by e.invoice_date", (i,))
-        up = rows(EV + "where e.user_id=? and e.end_date>=? order by e.start_date limit 5", (i, today().isoformat()))
+        up = rows(EV + "where e.user_id=? and e.end_date>? order by e.start_date limit 5", (i, td))
         fm = one("select coalesce(sum(amount),0) s from events where user_id=? and substr(invoice_date,1,7)=?", (i,ym))["s"]
         rm = one("select coalesce(sum(amount),0) s from events where user_id=? and paid=1 and substr(invoice_date,1,7)=?", (i,ym))["s"]
         rm = one(f"select coalesce(sum({CASHSQL}),0) s from events where user_id=? and paid=1 and substr(invoice_date,1,7)=?", (i, ym))["s"]
@@ -1355,13 +1356,15 @@ class H(BaseHTTPRequestHandler):
             f'<div class="mn"><a class="btn" href="/?m={prev}">‹</a><b>{mn} {first.year}</b><a class="btn" href="/?m={nxt}">›</a><span class="m">aplica-se a Faturado e Recebido</span></div>'
             '<div class="strip">' + tile("var(--todo)", "Por faturar", s(a), pl(len(a), "evento")) + tile("var(--inv)", "Faturado, por receber", sc(b), pl(len(b), "evento"))
             + tile("var(--brand)", f"Faturado em {mn}", fm, "pela data da fatura") + tile("var(--paid)", f"Recebido de {mn}", rm, "já pago") + '</div>'
-            + "<h2>Por faturar</h2>" + lst(a, "/", "Nada por faturar. 🎬") + "<h2>Por receber</h2>" + lst(b, "/", "Nada por receber.") + "<h2>Próximos eventos</h2>" + lst(up, "/", "Sem eventos futuros."), "/", u)
+            + "<h2>Por faturar</h2>" + lst(a, "/", "Nada por faturar. 🎬") + "<h2>Por receber</h2>" + lst(b, "/", "Nada por receber.") + '<div class="bar-h"><h2>Por realizar</h2><a href="/events?f=agendados">Ver todos ›</a></div>' + lst(up, "/", "Sem eventos por realizar."), "/", u)
 
     # ---- eventos
     def events(self, u, f):
-        w = {"faturar": "and e.invoice_date is null", "receber": "and e.invoice_date is not null and e.paid=0", "pagos": "and e.paid=1"}.get(f, "")
-        r = rows(EV + f"where e.user_id=? {w} order by e.start_date desc", (u["id"],))
-        chips = "".join(f'<a class="{"on" if f == k else ""}" href="/events?f={k}">{n}</a>' for k, n in [("todos", "Todos"), ("faturar", "Por faturar"), ("receber", "Por receber"), ("pagos", "Pagos")])
+        td = today().isoformat(); order = "e.start_date desc"
+        w = {"faturar": f"and e.invoice_date is null and e.end_date<='{td}'", "agendados": f"and e.end_date>'{td}'", "receber": "and e.invoice_date is not null and e.paid=0", "pagos": "and e.paid=1"}.get(f, "")
+        if f == "agendados": order = "e.start_date asc"
+        r = rows(EV + f"where e.user_id=? {w} order by {order}", (u["id"],))
+        chips = "".join(f'<a class="{"on" if f == k else ""}" href="/events?f={k}">{n}</a>' for k, n in [("todos", "Todos"), ("agendados", "Por realizar"), ("faturar", "Por faturar"), ("receber", "Por receber"), ("pagos", "Pagos")])
         return page("Eventos", f'<div class="bar-h"><h1>Eventos</h1><a class="btn p" href="/event/new">Novo evento</a></div><div class="chips">{chips}</div>' + lst(r, f"/events?f={f}", "Sem eventos." + ('<br><a href="/guide/2">Vê como agendar o primeiro</a>' if not one("select 1 from events where user_id=?", (u["id"],)) else "")), "/events", u)
 
     def event_form(self, u, i, date=""):
@@ -2271,7 +2274,7 @@ class H(BaseHTTPRequestHandler):
     # ---- exportação (PDF / Excel)
     XL = {"page": "Página", "generated": "Gerado em", "inv_date": "Data fatura", "event": "Evento", "client": "Cliente", "inv_no": "N.º fatura", "base": "Base (sem IVA)", "vat": "IVA", "wh": "Retenção",
           "total": "Total a receber", "status": "Estado", "totals": "Totais", "start": "Início", "end": "Fim", "none": "Sem eventos neste filtro.", "s_base": "Valor sem IVA", "s_vat": "IVA", "s_wh": "Retenção IRS",
-          "s_total": "Total a receber", "s_paid": "Já recebido", "s_due": "Por receber", "st_todo": "Por faturar", "st_inv": "Faturada", "st_paid": "Paga", "name": "Nome", "nif": "NIF", "contact": "Contacto",
+          "s_total": "Total a receber", "s_paid": "Já recebido", "s_due": "Por receber", "st_todo": "Por faturar", "st_plan": "Por realizar", "st_inv": "Faturada", "st_paid": "Paga", "name": "Nome", "nif": "NIF", "contact": "Contacto",
           "invoice": "Fatura", "desc": "Descrição", "amount": "Valor", "notes": "Notas", "dates": "Datas", "sheet": "Eventos", "sheet_event": "Evento"}
 
     def export_doc(self, u, f):
@@ -2310,12 +2313,12 @@ class H(BaseHTTPRequestHandler):
         if f.get("client") and f["client"].isdigit():
             cl = one("select * from clients where id=? and user_id=?", (f["client"], i))
             if cl: where.append("e.client_id=?"); args.append(cl["id"])
-        stt = f.get("status", "all"); where.append({"todo": "e.invoice_date is null", "inv": "e.invoice_date is not null and e.paid=0", "paid": "e.paid=1"}.get(stt, "1=1"))
+        stt = f.get("status", "all"); tds = today().isoformat(); where.append({"todo": f"e.invoice_date is null and e.end_date<='{tds}'", "plan": f"e.invoice_date is null and e.end_date>'{tds}'", "inv": "e.invoice_date is not null and e.paid=0", "paid": "e.paid=1"}.get(stt, "1=1"))
         rs = [mk(r) for r in rows(EV + "where " + " and ".join(where) + " order by coalesce(e.invoice_date, e.start_date), e.start_date", args)]
         tot = {k: sum(x[k] for x in rs) for k in ("base", "vat", "wh", "total")}; tot["paid"] = sum(x["total"] for x in rs if x["state"] == "paid"); tot["due"] = sum(x["total"] for x in rs if x["state"] == "inv")
         per = f"{dd(a)} – {dd(b)}" if a and b else (f"{tx('desde')} {dd(a)}" if a else (f"{tx('até')} {dd(b)}" if b else tx("Todo o período")))
         doc["kind"] = "list"; doc["title"] = tx("Relatório de eventos"); doc["rows"] = rs; doc["totals"] = tot
-        doc["filters"] = [(tx("Período"), per), (tx("Contar por"), tx("Data da fatura") if f.get("by", "invoice") == "invoice" else tx("Data do evento")), (T["status"], {"todo": T["st_todo"], "inv": T["st_inv"], "paid": T["st_paid"]}.get(stt, tx("Todos")))]
+        doc["filters"] = [(tx("Período"), per), (tx("Contar por"), tx("Data da fatura") if f.get("by", "invoice") == "invoice" else tx("Data do evento")), (T["status"], {"todo": T["st_todo"], "plan": T["st_plan"], "inv": T["st_inv"], "paid": T["st_paid"]}.get(stt, tx("Todos")))]
         doc["client"] = [(T["name"], cl["name"])] + [(k, cl[x]) for k, x in ((T["nif"], "nif"), (T["contact"], "contact"), (tx("Tarifa"), "rate"), (tx("Condições"), "terms")) if cl[x]] if cl else None
         if cl and doc["client"]: doc["filters"] = [(T["client"], cl["name"])] + doc["filters"]
         doc["name"] = "relatorio" + (f"-{mo}" if mo and a else (f"-{a}-{b}" if a and b else "")) + ("-" + re.sub(r"[^a-z0-9]+", "-", cl["name"].lower()).strip("-")[:20] if cl else "")
@@ -2335,7 +2338,7 @@ class H(BaseHTTPRequestHandler):
             '<div class="g2"><div><label>Mês</label><input type="month" name="month"></div><div></div></div><p class="m" style="margin:6px 0 0">Escolhe um mês ou um intervalo de datas. Se deixares vazio, exporta tudo.</p>'
             '<div class="g2"><div><label>De</label><input type="date" name="from"></div><div><label>Até</label><input type="date" name="to"></div></div>'
             '<div class="g2"><div><label>Contar por</label><select name="by"><option value="invoice">Data da fatura</option><option value="event">Data do evento</option></select></div>'
-            '<div><label>Estado</label><select name="status"><option value="all">Todos</option><option value="todo">Por faturar</option><option value="inv">Faturadas (por receber)</option><option value="paid">Pagas</option></select></div></div>'
+            '<div><label>Estado</label><select name="status"><option value="all">Todos</option><option value="plan">Por realizar</option><option value="todo">Por faturar</option><option value="inv">Faturadas (por receber)</option><option value="paid">Pagas</option></select></div></div>'
             '<p style="margin-top:18px"><button class="p" name="fmt" value="pdf">Descarregar PDF</button> <button name="fmt" value="xlsx">Descarregar Excel</button></p>'
             '<p class="m">Isto não é uma fatura: é um resumo informativo para teu controlo.</p></form>', "/stats", u)
 
