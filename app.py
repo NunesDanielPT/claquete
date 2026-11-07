@@ -127,7 +127,7 @@ def migrate(c):
     if fc and "intro" not in fc: c.execute("alter table friends add column intro text")
     mc = {r[1] for r in c.execute("pragma table_info(chat_msgs)")}
     if mc and "img" not in mc: c.execute("alter table chat_msgs add column img integer default 0")
-    for name, ddl in (("is_admin", "integer default 0"), ("disabled", "integer default 0"), ("last_seen", "text"), ("av_v", "integer default 0"), ("guide_seen", "integer default 0"), ("theme", "text default 'auto'"), ("vat_country", "text default 'PT'"), ("vat_def", "text default 'none'"), ("wh_def", "real default 0"), ("ss_on", "integer default 0"), ("ss_rate", "real default 21.4"), ("ss_coef", "real default 70")):
+    for name, ddl in (("is_admin", "integer default 0"), ("disabled", "integer default 0"), ("last_seen", "text"), ("av_v", "integer default 0"), ("guide_seen", "integer default 0"), ("theme", "text default 'auto'"), ("iban", "text"), ("vat_country", "text default 'PT'"), ("vat_def", "text default 'none'"), ("wh_def", "real default 0"), ("ss_on", "integer default 0"), ("ss_rate", "real default 21.4"), ("ss_coef", "real default 70")):
         if name not in cols: c.execute(f"alter table users add column {name} {ddl}")
     if not c.execute("select 1 from users where is_admin=1").fetchone():
         c.execute("update users set is_admin=1 where id=(select min(id) from users)")
@@ -1967,7 +1967,7 @@ class H(BaseHTTPRequestHandler):
 
     # ---- definições
     # ---- envio de faturas por email
-    MAIL_DEF = ("Fatura {n_fatura} – {evento}", "Olá {cliente},\n\nSegue em anexo a fatura {n_fatura} referente a {evento} ({datas}), no valor de {valor}.\n\nQualquer dúvida, estou à disposição.\n\nCumprimentos,", "{meu_nome}")
+    MAIL_DEF = ("Fatura {n_fatura} – {evento} | {meu_nome}", "Olá {cliente},\n\nObrigado pela confiança e pela excelente colaboração em {evento} ({datas}). Foi um gosto trabalhar convosco!\n\nSegue em anexo a fatura {n_fatura}, no valor de {valor}. Em baixo encontram os meus dados de contacto e de pagamento.\n\nSe precisarem de qualquer esclarecimento, estou sempre disponível.\n\nMais uma vez, muito obrigado e até à próxima!", "Com os melhores cumprimentos,\n{meu_nome}")
 
     def mcfg(self, uid): return one("select * from mailcfg where user_id=?", (uid,))
     def mready(self, c): return bool(c and c["host"] and c["pw_enc"] and c["from_email"])
@@ -2029,7 +2029,8 @@ class H(BaseHTTPRequestHandler):
             + fld("Assunto", "subject", val=sub, extra='id="subject" maxlength="200"') + f'<label>Texto</label><textarea name="body" id="body" rows="8" maxlength="3000">{e(body)}</textarea>'
             + f'<label>Assinatura</label><textarea name="signature" rows="3" maxlength="500">{e(sig)}</textarea>'
             f'<label class="c" style="margin-top:12px"><input type="checkbox" name="send_pdf"{" checked" if g("send_pdf", 0) else ""}>Anexar também o resumo em PDF do Claquete</label>'
-            f'<label class="c"><input type="checkbox" name="footer"{" checked" if g("footer", 1) else ""}>Mostrar «Enviado com Claquete» no fim do email</label></div>'
+            f'<label class="c"><input type="checkbox" name="footer"{" checked" if g("footer", 1) else ""}>Mostrar o cartão do Claquete e «Enviado com Claquete» no fim do email</label>'
+            '<label class="c"><input type="checkbox" name="reset_text">Repor o texto sugerido (assunto, mensagem e assinatura)</label></div>'
             '<p><button class="p">Guardar</button></p></form>'
             + ('<form class="f card" method="post" action="/settings/mail/test"><b>Testar</b><p class="m">Envia um email de teste para o teu email da conta, com a configuração guardada.</p><button>Enviar teste</button></form>' if self.mready(c) else "")
             + '<script nonce="__NONCE__">var P={gmail:["smtp.gmail.com",587,"starttls"],outlook:["smtp-mail.outlook.com",587,"starttls"],office365:["smtp.office365.com",587,"starttls"]};'
@@ -2043,7 +2044,7 @@ class H(BaseHTTPRequestHandler):
             if not self.mready(c): return self.go("/settings/mail")
             try:
                 dd = dict(zip(mailer.VARS, ("Cliente Exemplo", "Evento de exemplo", "01/01/2027", "FT 2027/1", "1 230,00 €", "1 000,00 €", "02/01/2027", u["name"] or u["username"])))
-                msg = self.mail_build(u, c, [u["email"]], mailer.fill(c["subject"], dd), mailer.fill(c["body"], dd), mailer.fill(c["signature"], dd), [])
+                msg = self.mail_build(u, c, [u["email"]], mailer.fill(c["subject"], dd), mailer.fill(c["body"], dd), mailer.fill(c["signature"], dd), [], vals=dd)
                 mailer.send(self.mail_conn(c, sec_), msg, [u["email"]]); return self.out(self.mail_settings(u, ok="test"))
             except Exception as ex: print("ERRO teste email:", ex, flush=True); return self.out(self.mail_settings(u, err=tx(mailer.friendly(ex))))
         try:
@@ -2057,7 +2058,8 @@ class H(BaseHTTPRequestHandler):
             elif c and c["pw_enc"]: pw_enc = c["pw_enc"]
             else: raise ValueError("Indica a palavra-passe.")
             rt = f.get("reply_to", "").strip(); rt = rt if mailer.EMAIL_RE.match(rt) else ""
-            v = (host, port, sec, un, pw_enc, f.get("from_name", "").strip()[:80], fe, rt, f.get("subject", "").strip()[:200], f.get("body", "").strip()[:3000], f.get("signature", "").strip()[:500], 1 if f.get("send_pdf") else 0, 1 if f.get("footer") else 0)
+            dfl = [tx(x) for x in self.MAIL_DEF]
+            v = (host, port, sec, un, pw_enc, f.get("from_name", "").strip()[:80], fe, rt, dfl[0] if f.get("reset_text") else f.get("subject", "").strip()[:200], dfl[1] if f.get("reset_text") else f.get("body", "").strip()[:3000], dfl[2] if f.get("reset_text") else f.get("signature", "").strip()[:500], 1 if f.get("send_pdf") else 0, 1 if f.get("footer") else 0)
         except ValueError as ex: return self.out(self.mail_settings(u, err=tx(str(ex))))
         run("insert into mailcfg(host,port,sec,username,pw_enc,from_name,from_email,reply_to,subject,body,signature,send_pdf,footer,user_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?) on conflict(user_id) do update set "
             "host=excluded.host,port=excluded.port,sec=excluded.sec,username=excluded.username,pw_enc=excluded.pw_enc,from_name=excluded.from_name,from_email=excluded.from_email,reply_to=excluded.reply_to,"
@@ -2067,9 +2069,21 @@ class H(BaseHTTPRequestHandler):
     def mail_conn(self, c, sec_):
         return {"from_email": c["from_email"], "host": c["host"], "port": c["port"], "sec": c["sec"], "username": c["username"], "password": mailer.dec(sec_, c["pw_enc"]) or ""}
 
-    def mail_build(self, u, c, to, subject, body, sig, atts):
-        cf = cfg(); ft = tx("Enviado com Claquete") if c["footer"] else ""
-        return mailer.build({"from_name": c["from_name"], "from_email": c["from_email"], "reply_to": c["reply_to"]}, to, subject, body, sig, cf["c_brand"], cf["site_name"], ft, atts)
+    def mail_build(self, u, c, to, subject, body, sig, atts, r=None, vals=None, iban_on=True):
+        cf = cfg(); v = vals or {}; site_url = BASE_URL or ""; dd = lambda k: v.get(k, "")
+        name = c["from_name"] or u["name"] or u["username"]; reach = c["reply_to"] or c["from_email"]
+        card = [(tx("Evento"), dd("evento")), (tx("Datas"), dd("datas")), (tx("Fatura n.º"), dd("n_fatura")), (tx("Data da fatura"), dd("data_fatura"))]
+        card = [x for x in card if x[1]]
+        contact = [(tx("Email"), reach, "mailto:" + reach)] + ([(tx("Telemóvel"), u["phone"], "tel:" + re.sub(r"[^\d+]", "", u["phone"]))] if u["phone"] else [])
+        ib = re.sub(r"\s", "", u["iban"] or ""); ibn = (" ".join(ib[i:i + 4] for i in range(0, len(ib), 4)), name) if ib and iban_on else None
+        promo = ({"title": tx("Também és freelancer de audiovisual?"), "text": tx("O Claquete organiza os teus eventos, clientes e o estado das faturas num só sítio: calendário, estatísticas, exportação em PDF e Excel, e uma rede para falares com outros profissionais. Gratuito e feito por um freelancer português."),
+                  "button": tx("Conhecer o Claquete"), "url": site_url or "https://claquete.pt"} if c["footer"] else None)
+        ctx = {"brand": cf["c_brand"], "site": cf["site_name"], "logo": png_icon(96, tuple(cf[k] for k in COLOR_KEYS)) if promo else None, "header_name": name,
+               "header_sub": tx("Fatura") + (" " + dd("n_fatura") if dd("n_fatura") else ""), "preheader": tx("Fatura em anexo") + (" · " + dd("evento") if dd("evento") else "") + " · " + name,
+               "card": card, "total": (tx("Total a pagar"), dd("valor")) if dd("valor") else None, "contact_title": tx("Contacto"), "contact": contact,
+               "pay_title": tx("Dados para pagamento"), "iban": (tx("IBAN"), ibn[0], ibn[1]) if ibn else None, "promo": promo,
+               "footer": (tx("Enviado com Claquete") + (" · " + site_url.replace("https://", "").replace("http://", "") if site_url else "")) if c["footer"] else ""}
+        return mailer.build({"from_name": c["from_name"], "from_email": c["from_email"], "reply_to": c["reply_to"]}, to, subject, body, sig, atts, ctx)
 
     def mail_compose(self, u, eid, ok=""):
         r = one(EV + "where e.id=? and e.user_id=?", (eid, u["id"]))
@@ -2079,13 +2093,14 @@ class H(BaseHTTPRequestHandler):
         if not self.mready(c): return page("Enviar", back + '<p class="msg err">Ainda não ligaste o teu email.</p><p><a class="btn p" href="/settings/mail">Configurar envio de email</a></p>', "/events", u)
         if not to: return page("Enviar", back + '<p class="msg err">Este evento não tem cliente com email guardado.</p>' + (f'<p><a class="btn p" href="/client/{cl["id"]}">Adicionar email ao cliente</a></p>' if cl else f'<p><a class="btn p" href="/event/{eid}">Escolher cliente no evento</a></p>'), "/events", u)
         fl = one("select name from invoice_files where event_id=?", (eid,)); vals = self.mvals(u, r)
-        sub = mailer.fill(c["subject"] or tx(self.MAIL_DEF[0]), vals); body = mailer.fill(c["body"] or tx(self.MAIL_DEF[1]), vals); sig = mailer.fill(c["signature"] or "", vals)
+        sub = mailer.fill(c["subject"] or tx(self.MAIL_DEF[0]), vals); sub = sub if vals["meu_nome"] in sub else f"{sub} | {vals['meu_nome']}"; body = mailer.fill(c["body"] or tx(self.MAIL_DEF[1]), vals); sig = mailer.fill(c["signature"] or "", vals)
         hist = rows("select to_addr, status, error, created from mail_log where event_id=? and user_id=? order by id desc limit 5", (eid, u["id"]))
         hl = "".join(f'<li>{e(h["created"][:16])} · {e(h["to_addr"])} · {eh("enviado") if h["status"] == "ok" else eh("falhou")}</li>' for h in hist)
         msg = f'<p class="msg ok">{eh("Email enviado.")}</p>' if ok == "sent" else ""
         rc = "".join(f'<label class="c"><input type="checkbox" name="to" value="{e(x)}" checked>{e(x)}</label>' for x in to)
         return page("Enviar", back + msg + '<form class="f card" method="post" action="/event/' + str(eid) + '/mail/send"><label>Para</label>' + rc
-            + fld("Assunto", "subject", val=sub, extra='maxlength="200" required') + f'<label>Mensagem</label><textarea name="body" rows="10" maxlength="3000" required>{e(body + (chr(10) * 2 + sig if sig else ""))}</textarea>'
+            + fld("Assunto", "subject", val=sub, extra='maxlength="200" required') + f'<label>Mensagem</label><textarea name="body" rows="10" maxlength="3000" required>{e(body)}</textarea><p class="m">{eh("A assinatura, os teus contactos e o IBAN são adicionados ao email automaticamente.")}</p>'
+            + (f'<label class="c"><input type="checkbox" name="iban_on" checked>{eh("Incluir o meu IBAN no email")}</label>' if u["iban"] else f'<p class="m">{eh("Dica: guarda o teu IBAN em Definições para ele aparecer no email.")} <a href="/settings">{eh("Abrir definições")}</a></p>')
             + '<label>Anexos</label>'
             + (f'<label class="c"><input type="checkbox" name="att_inv" checked>{eh("Fatura")}: {e(fl["name"])}</label>' if fl else f'<p class="m">{eh("Não anexaste a fatura a este evento.")} <a href="/event/{eid}">{eh("Anexar")}</a></p>')
             + f'<label class="c"><input type="checkbox" name="att_pdf"{" checked" if c["send_pdf"] else ""}>{eh("Resumo em PDF do Claquete")}</label>'
@@ -2110,7 +2125,7 @@ class H(BaseHTTPRequestHandler):
         sub, body = f.get("subject", "").strip()[:200], f.get("body", "").strip()[:3000]
         if not sub or not body: return fail("Preenche o assunto e a mensagem.")
         try:
-            msg = self.mail_build(u, c, to, sub, body, "", atts); mailer.send(self.mail_conn(c, one("select v from kv where k='secret'")["v"]), msg, to)
+            msg = self.mail_build(u, c, to, sub, body, mailer.fill(c["signature"] or "", self.mvals(u, r)), atts, vals=self.mvals(u, r), iban_on=bool(f.get("iban_on"))); mailer.send(self.mail_conn(c, one("select v from kv where k='secret'")["v"]), msg, to)
             st, er = "ok", ""
         except Exception as ex: print("ERRO envio fatura:", ex, flush=True); st, er = "erro", mailer.friendly(ex)
         run("insert into mail_log(user_id,event_id,to_addr,subject,status,error,created) values(?,?,?,?,?,?,?)", (i, eid, ", ".join(to), sub, st, er, dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
@@ -2282,7 +2297,7 @@ class H(BaseHTTPRequestHandler):
         clean = lambda s: s.replace("\u202f", " ").replace("\xa0", " ")
         eurx = lambda v: clean(eur(v)); dd = lambda s: f"{s[8:10]}/{s[5:7]}/{s[:4]}" if s else ""
         cols = tuple(c[k] for k in COLOR_KEYS)
-        issuer_kv = [(tx("Emitido por"), u["name"] or u["username"]), (tx("Utilizador"), u["username"]), (tx("Email"), u["email"])] + ([(tx("Telemóvel"), u["phone"])] if u["phone"] else [])
+        issuer_kv = [(tx("Emitido por"), u["name"] or u["username"]), (tx("Utilizador"), u["username"]), (tx("Email"), u["email"])] + ([(tx("Telemóvel"), u["phone"])] if u["phone"] else []) + ([(tx("IBAN"), u["iban"])] if u["iban"] else [])
         issuer = [u["name"] or u["username"], f'@{u["username"]}  |  {u["email"]}'] + ([u["phone"]] if u["phone"] else [])
         doc = {"T": T, "eur": eurx, "d": dd, "cols": cols, "site": c["site_name"], "issuer": issuer, "issuer_kv": issuer_kv, "generated": dt.datetime.now().strftime("%d/%m/%Y %H:%M"),
                "disclaimer": tx("Documento informativo gerado pelo Claquete. Não é uma fatura nem um documento fiscal."), "png": png_icon(96, cols)}
@@ -2369,6 +2384,7 @@ class H(BaseHTTPRequestHandler):
         msg = {"profile": "Dados guardados.", "password": "Palavra-passe alterada.", "ics": "Link novo gerado. O antigo deixou de funcionar.", "avatar": "Foto guardada.", "avatar_rm": "Foto removida.", "tax": "Preferências de faturação guardadas.", "theme": "Tema guardado."}.get(ok); m = f'<p class="msg ok">{msg}</p>' if msg else (f'<p class="msg err">{err}</p>' if err else "")
         return page("Conta", f'<h1>Conta</h1><p class="sub">Os teus dados e a tua segurança.</p>{m}<form class="f card" method="post" action="/settings/profile"><h2>Dados pessoais</h2>'
             + fld("Nome", "name", val=u["name"], extra="required") + fld("Email", "email", "email", u["email"], "required") + fld("Telemóvel", "phone", "tel", u["phone"] or "")
+            + fld("IBAN (opcional, aparece nos emails de fatura)", "iban", val=" ".join((u["iban"] or "")[i:i + 4] for i in range(0, len(u["iban"] or ""), 4)), extra='maxlength="42" autocomplete="off" placeholder="PT50 0000 0000 0000 0000 0000 0"')
             + f'<p class="m">Utilizador: <b>{e(u["username"])}</b></p><p><button class="p">Guardar dados</button></p></form>'
             + '<div class="card"><h2>Perfil profissional</h2><p class="m">Aparece na rede AV Freelancers para outros colegas te encontrarem. Só fica visível se tu quiseres.</p><p><a class="btn" href="/people/me">Editar perfil profissional</a></p></div>'
             + '<div class="card"><h2>Envio de faturas por email</h2><p class="m">Liga o teu email e envia a fatura ao cliente diretamente a partir do evento, com uma mensagem tua.</p><p><a class="btn" href="/settings/mail">Configurar envio de email</a></p></div>'
@@ -2389,7 +2405,9 @@ class H(BaseHTTPRequestHandler):
     def save_profile(self, u, f):
         name, em, ph = f.get("name", "").strip()[:60], f.get("email", "").strip(), f.get("phone", "").strip()[:30]
         if not name or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", em): return self.out(self.settings(u, err="Nome e email válidos são obrigatórios."), 400)
-        try: run("update users set name=?, email=?, phone=? where id=?", (name, em, ph, u["id"]))
+        ib = re.sub(r"\s", "", f.get("iban", "")).upper()
+        if ib and not re.match(r"^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$", ib): return self.out(self.settings(u, err="O IBAN não parece válido."), 400)
+        try: run("update users set name=?, email=?, phone=?, iban=? where id=?", (name, em, ph, ib, u["id"]))
         except sqlite3.IntegrityError: return self.out(self.settings(u, err="Esse email já está a ser usado por outra conta."), 400)
         self.go("/settings?ok=profile")
 
