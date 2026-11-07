@@ -75,3 +75,6 @@ Admin → Email: servidor, porta, segurança, utilizador, palavra-passe (cifrada
 
 ## Estados dos eventos
 **Por realizar** (ainda não terminaram: data de fim posterior a hoje e sem fatura) → **Por faturar** (já terminaram e não têm fatura) → **Faturada** → **Paga**. Um evento só entra em «Por faturar» a partir do dia em que termina. Há um separador «Por realizar» na página Eventos e a mesma opção no filtro de exportação.
+
+## Email de fatura
+O email enviado ao cliente é HTML responsivo: cabeçalho com o nome do utilizador, texto de agradecimento personalizável, cartão com o resumo (evento, datas, n.º e data da fatura, total a pagar), contactos, IBAN (Definições → Dados pessoais) e um cartão de apresentação do Claquete (desligável nas definições do envio). O assunto inclui sempre o nome do utilizador.
