@@ -913,6 +913,14 @@ P += [
     ('Horas trabalhadas em cada dia', 'Hours worked each day', 'Horas trabajadas cada día', 'Heures travaillées chaque jour', 'Ore lavorate ogni giorno'),
     ('Horas extra', 'Overtime', 'Horas extra', 'Heures supplémentaires', 'Ore extra'),
 ]
+P += [
+    ('Diz quantas horas o teu valor diário inclui e preenche a hora de entrada e de saída de cada dia: as horas são calculadas sozinhas. As que passam do limite são pagas ao valor por hora extra e somadas ao total.', 'Say how many hours your daily rate includes and fill in the start and end time of each day: the hours are calculated automatically. Hours above the limit are paid at the overtime hourly rate and added to the total.', 'Indica cuántas horas incluye tu tarifa diaria y rellena la hora de entrada y de salida de cada día: las horas se calculan solas. Las que superan el límite se pagan al precio por hora extra y se suman al total.', 'Indiquez combien d’heures comprend votre tarif journalier et saisissez l’heure d’arrivée et de départ de chaque jour : les heures sont calculées automatiquement. Celles au-delà de la limite sont payées au tarif horaire supplémentaire et ajoutées au total.', 'Indica quante ore include la tua tariffa giornaliera e compila l’ora di entrata e di uscita di ogni giorno: le ore sono calcolate automaticamente. Quelle oltre il limite sono pagate alla tariffa oraria extra e sommate al totale.'),
+    ('Pausa não paga (minutos por dia)', 'Unpaid break (minutes per day)', 'Pausa no pagada (minutos por día)', 'Pause non payée (minutes par jour)', 'Pausa non pagata (minuti al giorno)'),
+    ('Entrada, saída e horas de cada dia', 'Start, end and hours of each day', 'Entrada, salida y horas de cada día', 'Arrivée, départ et heures de chaque jour', 'Entrata, uscita e ore di ogni giorno'),
+    ('Entrada', 'Start', 'Entrada', 'Arrivée', 'Entrata'),
+    ('Saída', 'End', 'Salida', 'Départ', 'Uscita'),
+    ('Horas', 'Hours', 'Horas', 'Heures', 'Ore'),
+]
 # --- e-mails (pt, en, es, fr, it) com {marcadores}
 MAIL = {
     "welcome_s": ("Bem-vindo à {site}", "Welcome to {site}", "Bienvenido a {site}", "Bienvenue sur {site}", "Benvenuto su {site}"),

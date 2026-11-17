@@ -121,6 +121,9 @@ def migrate(c):
     ec = {r[1] for r in c.execute("pragma table_info(events)")}
     for name, ddl in (("vat_mode", "text default 'none'"), ("vat_rate", "real default 0"), ("wh_rate", "real default 0")):
         if ec and name not in ec: c.execute(f"alter table events add column {name} {ddl}")
+    oc = {r[1] for r in c.execute("pragma table_info(ot)")}
+    for col, ddl in (("tin", "text"), ("tout", "text"), ("brk", "real default 0")):
+        if oc and col not in oc: c.execute(f"alter table ot add column {col} {ddl}")
     ic = {r[1] for r in c.execute("pragma table_info(items)")}
     if ic and "auto" not in ic: c.execute("alter table items add column auto integer default 0")
     cc = {r[1] for r in c.execute("pragma table_info(clients)")}
@@ -276,7 +279,7 @@ def init():
       end_date text not null, client_id integer references clients(id) on delete set null, amount real default 0, invoice_date text,
       invoice_no text, paid integer default 0, paid_date text, notes text);
     create table if not exists items(id integer primary key, event_id integer references events(id) on delete cascade, label text, amount real);
-    create table if not exists ot(event_id integer primary key references events(id) on delete cascade, base real, rate real, hours text);
+    create table if not exists ot(event_id integer primary key references events(id) on delete cascade, base real, rate real, hours text, tin text, tout text, brk real default 0);
     create table if not exists kv(k text primary key, v text);
     create table if not exists tickets(id integer primary key, token text unique, user_id integer, name text, email text, subject text, status text default 'open',
       lang text, created text, updated text, unread_admin integer default 1, unread_user integer default 0);
@@ -372,7 +375,7 @@ button.d{color:var(--todo)}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bot
 .st b{display:block;font-size:1.6rem;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:2px}.st span{color:var(--mut);font-size:.85rem}
 .list{background:var(--sf);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}.list>.empty{padding:18px;color:var(--mut)}
 .er{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 14px;border-top:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c,transparent)}
-.er:first-child{border-top:0}.otd{margin:10px 0 4px;border:1px solid var(--line);border-radius:var(--r);padding:8px 14px}.otd summary{cursor:pointer;font-weight:600}.otdays{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;margin:6px 0}.f label.od{margin:0;display:block}.od span{display:block;font-size:.75rem;color:var(--mut);margin:0 0 3px}.od input{width:100%;margin:0}.sum small{font-weight:400;color:var(--mut)}.todo{--c:var(--todo)}.plan{--c:#5f6b8a}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
+.er:first-child{border-top:0}.otd{margin:10px 0 4px;border:1px solid var(--line);border-radius:var(--r);padding:8px 14px}.otd summary{cursor:pointer;font-weight:600}.otdays{display:grid;gap:8px;margin:6px 0}.od{display:grid;grid-template-columns:34px minmax(0,1fr) minmax(0,1fr) 52px;gap:6px;align-items:end}.od input{min-width:0;font-size:.9rem}.od input[type=time]{padding-right:2px}@media(max-width:520px){.od{grid-template-columns:34px minmax(0,1fr) minmax(0,1fr)}.od label:last-child{grid-column:2/4}.od b{grid-row:1/3;align-self:center;padding:0}}.od b{font-size:.85rem;padding-bottom:12px}.f .od label{margin:0;display:block}.od span{display:block;font-size:.72rem;color:var(--mut);margin:0 0 3px}.od input{width:100%;margin:0;padding-left:8px;padding-right:6px}.sum small{font-weight:400;color:var(--mut)}.todo{--c:var(--todo)}.plan{--c:#5f6b8a}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
 .eh{display:flex;gap:12px;align-items:center;text-decoration:none;min-width:0;flex:1}.eh b{display:block;font-weight:620}.eh small{color:var(--mut);display:block;font-size:.85rem}
 .eh>div{min-width:0}.ea{display:flex;align-items:center;gap:12px;justify-content:flex-end}.amt{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
 .late{color:var(--todo);font-style:normal;font-weight:600}
@@ -1386,9 +1389,10 @@ class H(BaseHTTPRequestHandler):
             + fld("Título", "title", val=v["title"] if v else "", extra="required" + ("" if v else " autofocus"))
             + f'<div class="g2"><div><label>Data de início</label><input type="date" id="sd" name="start" value="{sd}" required></div><div><label>Data de fim</label><input type="date" id="ed" name="end" value="{ed}" required></div></div>'
             f'<label>Cliente</label><select id="cs" name="client_id"><option value="">— sem cliente —</option>{cl}</select><div class="info" id="ci" hidden></div>'
-            f'<label>Valores</label><div id="items">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><details class="otd" id="otw"{" open" if ot else ""}><summary>⏱ Horas extra (opcional)</summary><p class="m">Diz quantas horas o teu valor diário inclui. As horas feitas acima disso, em cada dia, são calculadas ao valor por hora extra e somadas ao total.</p>'
+            f'<label>Valores</label><div id="items">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><details class="otd" id="otw"{" open" if ot else ""}><summary>⏱ Horas extra (opcional)</summary><p class="m">Diz quantas horas o teu valor diário inclui e preenche a hora de entrada e de saída de cada dia: as horas são calculadas sozinhas. As que passam do limite são pagas ao valor por hora extra e somadas ao total.</p>'
             f'<div class="g2"><div><label>Horas incluídas por dia</label><input id="otb" name="ot_base" inputmode="decimal" value="{otf(ot["base"] if ot else 0)}" placeholder="10"></div><div><label>Valor por hora extra (€)</label><input id="otr" name="ot_rate" inputmode="decimal" value="{otf(ot["rate"] if ot else 0)}" placeholder="0{dsep()}00"></div></div>'
-            f'<label>Horas trabalhadas em cada dia</label><div id="otd" class="otdays" data-h="{e(ot["hours"] if ot else "")}"></div><div class="sum" id="ots" hidden></div></details>'
+            f'<label>Pausa não paga (minutos por dia)</label><input id="otk" name="ot_brk" inputmode="numeric" value="{otf(ot["brk"] if ot else 0)}" placeholder="0" style="max-width:140px">'
+            f'<label>Entrada, saída e horas de cada dia</label><div id="otd" class="otdays" data-h="{e(ot["hours"] if ot else "")}" data-i="{e(ot["tin"] or "" if ot else "")}" data-o="{e(ot["tout"] or "" if ot else "")}" data-e="{eh(tx("Entrada"))}" data-s="{eh(tx("Saída"))}" data-t="{eh(tx("Horas"))}"></div><div class="sum" id="ots" hidden></div></details>'
             f'<div class="sum">Valor sem IVA<span id="tot">0{dsep()}00 €</span></div>'
             f'<div class="g2"><div><label>IVA</label>{vat_select(u["vat_country"] or "PT", vat_code(v["vat_mode"], v["vat_rate"]) if v else u["vat_def"] or "none")}</div><div><label>Retenção na fonte (IRS)</label>{wh_select((v["wh_rate"] if v else u["wh_def"]) or 0)}</div></div>'
             f'<div class="tx" id="tx" data-iva="{eh(tx("IVA"))}" data-ret="{eh(tx("Retenção"))}" data-tot="{eh(tx("Total a receber"))}" data-rc="{eh(tx("IVA liquidado pelo cliente (autoliquidação)"))}"></div>'
@@ -1411,12 +1415,16 @@ class H(BaseHTTPRequestHandler):
             + '<script nonce="__NONCE__">(function(){var B=document.getElementById("otb"),R=document.getElementById("otr"),D=document.getElementById("otd"),S=document.getElementById("ots"),a=document.getElementById("sd"),b=document.getElementById("ed"),DS="' + dsep() + '",LB="' + eh(tx("Horas extra")) + '";'
             'function n(x){return parseFloat(String(x).replace(",","."))||0}function m(x){return (Math.round(x*100)/100).toString().replace(".",DS)}'
             'function days(){var o=[],s=a.value,e=b.value;if(!s||!e||e<s)return o;var d=new Date(s+"T00:00:00Z"),z=new Date(e+"T00:00:00Z");while(d<=z&&o.length<62){o.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1)}return o}'
-            'var first=(D.dataset.h||"").split(",");'
-            'function ext(){var base=n(B.value),x=0;D.querySelectorAll("input").forEach(function(i){var h=n(i.value);if(base>0&&h>base)x+=h-base});return x}'
+            'var K=document.getElementById("otk"),FH=(D.dataset.h||"").split(","),FI=(D.dataset.i||"").split(","),FO=(D.dataset.o||"").split(",");'
+            'function hm(x){var q=/^(\\d{1,2}):(\\d{2})$/.exec(x||"");return q?(+q[1])*60+(+q[2]):null}'
+            'function span(i,o){var a=hm(i),b=hm(o);if(a===null||b===null)return null;var m=b-a;if(m<=0)m+=1440;m-=n(K.value);return Math.max(0,m)/60}'
+            'function ext(){var base=n(B.value),x=0;D.querySelectorAll("input.oh").forEach(function(i){var h=n(i.value);if(base>0&&h>base)x+=h-base});return x}'
             'window.OT=function(){return Math.round(ext()*n(R.value)*100)/100};'
-            'function calc(){var x=ext(),r=n(R.value);S.hidden=!(x>0&&r>0);if(!S.hidden)S.innerHTML=LB+" <small>("+m(x)+" h × "+m(r)+" €)</small><span>"+m(x*r)+" €</span>";document.getElementById("items").dispatchEvent(new Event("input",{bubbles:true}))}'
-            'function build(){var cur=[].map.call(D.querySelectorAll("input"),function(i){return i.value});if(!cur.length)cur=first;D.innerHTML="";days().forEach(function(d,k){var l=document.createElement("label");l.className="od";l.innerHTML="<span>"+d.slice(8)+"/"+d.slice(5,7)+"</span>";var i=document.createElement("input");i.name="oth";i.setAttribute("inputmode","decimal");i.value=cur[k]||"";l.appendChild(i);D.appendChild(l)});calc()}'
-            '[B,R].forEach(function(i){i.addEventListener("input",calc)});D.addEventListener("input",calc);a.addEventListener("change",build);b.addEventListener("change",build);build()})();</script>', "/events", u)
+            'function calc(){var x=ext(),r=n(R.value);S.hidden=!(x>0&&r>0);if(!S.hidden)S.innerHTML=LB+" <small>("+m(x)+" h \u00d7 "+m(r)+" \u20ac)</small><span>"+m(x*r)+" \u20ac</span>";document.getElementById("items").dispatchEvent(new Event("input",{bubbles:true}))}'
+            'function row(d,h,i,o){var l=document.createElement("div");l.className="od";l.innerHTML="<b>"+d.slice(8)+"/"+d.slice(5,7)+"</b><label><span>"+D.dataset.e+"</span><input type=time name=oti></label><label><span>"+D.dataset.s+"</span><input type=time name=oto></label><label><span>"+D.dataset.t+"</span><input class=oh name=oth inputmode=decimal></label>";'
+            'var q=l.querySelectorAll("input");q[0].value=i||"";q[1].value=o||"";q[2].value=h||"";function up(){var v=span(q[0].value,q[1].value);if(v!==null)q[2].value=m(v);calc()}q[0].oninput=up;q[1].oninput=up;q[2].oninput=calc;return l}'
+            'function build(){var ch=[].map.call(D.querySelectorAll(".od"),function(r){var q=r.querySelectorAll("input");return[q[2].value,q[0].value,q[1].value]});D.innerHTML="";days().forEach(function(d,k){var c=ch[k]||[FH[k],FI[k],FO[k]];D.appendChild(row(d,c[0],c[1],c[2]))});calc()}'
+            '[B,R].forEach(function(i){i.addEventListener("input",calc)});K.addEventListener("input",function(){D.querySelectorAll(".od").forEach(function(r){var q=r.querySelectorAll("input"),v=span(q[0].value,q[1].value);if(v!==null)q[2].value=m(v)});calc()});a.addEventListener("change",build);b.addEventListener("change",build);build()})();</script>', "/events", u)
 
     def save_event(self, u, f):
         vm, vr = parse_vat(f.get("vat", "none"), f.get("vatc", "")); wr = parse_wh(f.get("wh", "0"), f.get("whc", ""))
@@ -1425,7 +1433,14 @@ class H(BaseHTTPRequestHandler):
         cid = f.get("client_id") if one("select 1 from clients where id=? and user_id=?", (f.get("client_id") or 0, i)) else None
         its = [(l.strip()[:80], num(a)) for l, a in zip(self.fl.get("label", []), self.fl.get("amt", [])) if l.strip() or a.strip()]
         ndays = min((dt.date.fromisoformat(ed) - dt.date.fromisoformat(sd)).days + 1, 62); ob, orate = max(num(f.get("ot_base", "0")), 0), max(num(f.get("ot_rate", "0")), 0)
-        oh = [num(x) if x.strip() else 0 for x in self.fl.get("oth", [])[:ndays]]; extra = sum(h - ob for h in oh if ob > 0 and h > ob); auto = None
+        brk = min(max(num(f.get("ot_brk", "0")), 0), 600); ti, to_, oh = (self.fl.get("oti", []) + [""] * ndays)[:ndays], (self.fl.get("oto", []) + [""] * ndays)[:ndays], []
+        hm = lambda x: (int(x[:2]) * 60 + int(x[3:5])) if re.match(r"^\d{1,2}:\d{2}$", x or "") and int(x.split(":")[0]) < 24 and int(x.split(":")[1]) < 60 else None
+        for k_, hv in enumerate((self.fl.get("oth", []) + [""] * ndays)[:ndays]):
+            a_, b_ = hm(ti[k_]), hm(to_[k_])
+            if a_ is not None and b_ is not None:
+                m_ = b_ - a_; m_ = m_ + 1440 if m_ <= 0 else m_; oh.append(round(max(0, m_ - brk) / 60, 2))
+            else: oh.append(num(hv) if hv.strip() else 0)
+        extra = sum(h - ob for h in oh if ob > 0 and h > ob); auto = None
         if extra > 0 and orate > 0:
             auto = (f"{tx('Horas extra')} ({extra:g} h × {eur(orate).replace(chr(8239), ' ').replace(chr(160), ' ')})", round(extra * orate, 2))
         inv = okdate(f.get("invoice_date", "")); paid = 1 if f.get("paid") else 0; t = today().isoformat()
@@ -1440,7 +1455,7 @@ class H(BaseHTTPRequestHandler):
           else: eid = c.execute("insert into events(title,start_date,end_date,client_id,amount,invoice_date,invoice_no,paid,paid_date,notes,vat_mode,vat_rate,wh_rate,user_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", v + (i,)).lastrowid
           c.execute("delete from items where event_id=?", (eid,)); c.executemany("insert into items(event_id,label,amount,auto) values(?,?,?,0)", [(eid, l, a) for l, a in its])
           if auto: c.execute("insert into items(event_id,label,amount,auto) values(?,?,?,1)", (eid,) + auto)
-          if ob > 0 or orate > 0 or any(oh): c.execute("insert into ot(event_id,base,rate,hours) values(?,?,?,?) on conflict(event_id) do update set base=excluded.base,rate=excluded.rate,hours=excluded.hours", (eid, ob, orate, ",".join(f"{h:g}" if h else "" for h in oh)))
+          if ob > 0 or orate > 0 or any(oh): c.execute("insert into ot(event_id,base,rate,hours,tin,tout,brk) values(?,?,?,?,?,?,?) on conflict(event_id) do update set base=excluded.base,rate=excluded.rate,hours=excluded.hours,tin=excluded.tin,tout=excluded.tout,brk=excluded.brk", (eid, ob, orate, ",".join(f"{h:g}" if h else "" for h in oh), ",".join(x if hm(x) is not None else "" for x in ti), ",".join(x if hm(x) is not None else "" for x in to_), brk))
           else: c.execute("delete from ot where event_id=?", (eid,))
           c.commit()
         finally: c.close()
