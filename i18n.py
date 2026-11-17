@@ -905,6 +905,14 @@ P += [
     ('Repor o texto sugerido (assunto, mensagem e assinatura)', 'Reset to the suggested text (subject, message and signature)', 'Restablecer el texto sugerido (asunto, mensaje y firma)', 'Rétablir le texte suggéré (objet, message et signature)', 'Ripristina il testo suggerito (oggetto, messaggio e firma)'),
 ]
 P += [("Fatura de","Invoice from","Factura de","Facture de","Fattura di")]
+P += [
+    ('Horas extra (opcional)', 'Overtime (optional)', 'Horas extra (opcional)', 'Heures supplémentaires (facultatif)', 'Ore extra (facoltativo)'),
+    ('Diz quantas horas o teu valor diário inclui. As horas feitas acima disso, em cada dia, são calculadas ao valor por hora extra e somadas ao total.', 'Say how many hours your daily rate includes. Hours worked above that, each day, are charged at the overtime hourly rate and added to the total.', 'Indica cuántas horas incluye tu tarifa diaria. Las horas trabajadas por encima, cada día, se calculan al precio por hora extra y se suman al total.', 'Indiquez combien d’heures comprend votre tarif journalier. Les heures au-delà, chaque jour, sont calculées au tarif horaire supplémentaire et ajoutées au total.', 'Indica quante ore include la tua tariffa giornaliera. Le ore oltre, ogni giorno, sono calcolate alla tariffa oraria extra e sommate al totale.'),
+    ('Horas incluídas por dia', 'Hours included per day', 'Horas incluidas por día', 'Heures incluses par jour', 'Ore incluse al giorno'),
+    ('Valor por hora extra (€)', 'Overtime hourly rate (€)', 'Precio por hora extra (€)', 'Tarif de l’heure supplémentaire (€)', 'Tariffa oraria extra (€)'),
+    ('Horas trabalhadas em cada dia', 'Hours worked each day', 'Horas trabajadas cada día', 'Heures travaillées chaque jour', 'Ore lavorate ogni giorno'),
+    ('Horas extra', 'Overtime', 'Horas extra', 'Heures supplémentaires', 'Ore extra'),
+]
 # --- e-mails (pt, en, es, fr, it) com {marcadores}
 MAIL = {
     "welcome_s": ("Bem-vindo à {site}", "Welcome to {site}", "Bienvenido a {site}", "Bienvenue sur {site}", "Benvenuto su {site}"),
