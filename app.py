@@ -121,6 +121,8 @@ def migrate(c):
     ec = {r[1] for r in c.execute("pragma table_info(events)")}
     for name, ddl in (("vat_mode", "text default 'none'"), ("vat_rate", "real default 0"), ("wh_rate", "real default 0")):
         if ec and name not in ec: c.execute(f"alter table events add column {name} {ddl}")
+    ic = {r[1] for r in c.execute("pragma table_info(items)")}
+    if ic and "auto" not in ic: c.execute("alter table items add column auto integer default 0")
     cc = {r[1] for r in c.execute("pragma table_info(clients)")}
     if cc and "email" not in cc: c.execute("alter table clients add column email text")
     fc = {r[1] for r in c.execute("pragma table_info(friends)")}
@@ -274,6 +276,7 @@ def init():
       end_date text not null, client_id integer references clients(id) on delete set null, amount real default 0, invoice_date text,
       invoice_no text, paid integer default 0, paid_date text, notes text);
     create table if not exists items(id integer primary key, event_id integer references events(id) on delete cascade, label text, amount real);
+    create table if not exists ot(event_id integer primary key references events(id) on delete cascade, base real, rate real, hours text);
     create table if not exists kv(k text primary key, v text);
     create table if not exists tickets(id integer primary key, token text unique, user_id integer, name text, email text, subject text, status text default 'open',
       lang text, created text, updated text, unread_admin integer default 1, unread_user integer default 0);
@@ -369,7 +372,7 @@ button.d{color:var(--todo)}.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bot
 .st b{display:block;font-size:1.6rem;letter-spacing:-.03em;font-variant-numeric:tabular-nums;line-height:1.25;margin-top:2px}.st span{color:var(--mut);font-size:.85rem}
 .list{background:var(--sf);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}.list>.empty{padding:18px;color:var(--mut)}
 .er{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 14px;border-top:1px solid var(--line);box-shadow:inset 3px 0 0 var(--c,transparent)}
-.er:first-child{border-top:0}.todo{--c:var(--todo)}.plan{--c:#5f6b8a}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
+.er:first-child{border-top:0}.otd{margin:10px 0 4px;border:1px solid var(--line);border-radius:var(--r);padding:8px 14px}.otd summary{cursor:pointer;font-weight:600}.otdays{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:8px;margin:6px 0}.f label.od{margin:0;display:block}.od span{display:block;font-size:.75rem;color:var(--mut);margin:0 0 3px}.od input{width:100%;margin:0}.sum small{font-weight:400;color:var(--mut)}.todo{--c:var(--todo)}.plan{--c:#5f6b8a}.inv{--c:var(--inv)}.paid{--c:var(--paid)}
 .eh{display:flex;gap:12px;align-items:center;text-decoration:none;min-width:0;flex:1}.eh b{display:block;font-weight:620}.eh small{color:var(--mut);display:block;font-size:.85rem}
 .eh>div{min-width:0}.ea{display:flex;align-items:center;gap:12px;justify-content:flex-end}.amt{font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
 .late{color:var(--todo);font-style:normal;font-weight:600}
@@ -1372,7 +1375,8 @@ class H(BaseHTTPRequestHandler):
         if i != "new":
             v = one("select * from events where id=? and user_id=?", (i, u["id"]))
             if not v: raise ValueError
-        its = [(x["label"], x["amount"]) for x in rows("select * from items where event_id=? order by id", (i,))] if v else []
+        its = [(x["label"], x["amount"]) for x in rows("select * from items where event_id=? and coalesce(auto,0)=0 order by id", (i,))] if v else []
+        ot = one("select * from ot where event_id=?", (i,)) if v else None; otf = lambda x: f"{x:g}".replace(".", dsep()) if x else ""
         sd = v["start_date"] if v else (okdate(date) or today().isoformat()); ed = v["end_date"] if v else sd
         cl = "".join(f'<option value="{c["id"]}" data-i="{e(" · ".join(x for x in (c["rate"], c["terms"]) if x))}" {"selected" if v and c["id"] == v["client_id"] else ""}>{e(c["name"])}</option>' for c in rows("select * from clients where user_id=? order by name", (u["id"],)))
         rowsh = "".join(f'<div class="it"><input name="label" list="sug" value="{e(l)}" placeholder="Descrição"><input name="amt" inputmode="decimal" value="{f"{a:g}".replace(".", dsep())}" placeholder="0{dsep()}00"></div>' for l, a in (its or [(tx("Diária"), 0)]))
@@ -1382,25 +1386,37 @@ class H(BaseHTTPRequestHandler):
             + fld("Título", "title", val=v["title"] if v else "", extra="required" + ("" if v else " autofocus"))
             + f'<div class="g2"><div><label>Data de início</label><input type="date" id="sd" name="start" value="{sd}" required></div><div><label>Data de fim</label><input type="date" id="ed" name="end" value="{ed}" required></div></div>'
             f'<label>Cliente</label><select id="cs" name="client_id"><option value="">— sem cliente —</option>{cl}</select><div class="info" id="ci" hidden></div>'
-            f'<label>Valores</label><div id="items">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><div class="sum">Valor sem IVA<span id="tot">0{dsep()}00 €</span></div>'
+            f'<label>Valores</label><div id="items">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><details class="otd" id="otw"{" open" if ot else ""}><summary>⏱ Horas extra (opcional)</summary><p class="m">Diz quantas horas o teu valor diário inclui. As horas feitas acima disso, em cada dia, são calculadas ao valor por hora extra e somadas ao total.</p>'
+            f'<div class="g2"><div><label>Horas incluídas por dia</label><input id="otb" name="ot_base" inputmode="decimal" value="{otf(ot["base"] if ot else 0)}" placeholder="10"></div><div><label>Valor por hora extra (€)</label><input id="otr" name="ot_rate" inputmode="decimal" value="{otf(ot["rate"] if ot else 0)}" placeholder="0{dsep()}00"></div></div>'
+            f'<label>Horas trabalhadas em cada dia</label><div id="otd" class="otdays" data-h="{e(ot["hours"] if ot else "")}"></div><div class="sum" id="ots" hidden></div></details>'
+            f'<div class="sum">Valor sem IVA<span id="tot">0{dsep()}00 €</span></div>'
             f'<div class="g2"><div><label>IVA</label>{vat_select(u["vat_country"] or "PT", vat_code(v["vat_mode"], v["vat_rate"]) if v else u["vat_def"] or "none")}</div><div><label>Retenção na fonte (IRS)</label>{wh_select((v["wh_rate"] if v else u["wh_def"]) or 0)}</div></div>'
             f'<div class="tx" id="tx" data-iva="{eh(tx("IVA"))}" data-ret="{eh(tx("Retenção"))}" data-tot="{eh(tx("Total a receber"))}" data-rc="{eh(tx("IVA liquidado pelo cliente (autoliquidação)"))}"></div>'
             '<datalist id="sug">' + "".join(f'<option value="{eh(tx(x))}">' for x in ("Diária", "Meia diária", "Hora extra", "Aluguer de equipamento", "Deslocação", "Edição")) + '</datalist>'
             + f'<div class="g2"><div><label>Data da fatura (vazio = por faturar)</label><input type="date" name="invoice_date" value="{e(v["invoice_date"] if v else "")}"></div><div><label>N.º da fatura</label><input name="invoice_no" value="{e(v["invoice_no"] if v else "")}"></div></div>'
             f'<label class="c" style="margin-top:14px"><input type="checkbox" name="paid" {ck(v and v["paid"])}>Fatura paga (já recebi)</label><label>Notas</label><textarea name="notes" rows="3">{e(v["notes"] if v else "")}</textarea>'
             '<p><button class="p">Guardar</button> <a class="btn" href="/events">Cancelar</a></p></form>' + (self.mail_card(u, v) if v else "") + (f'<div class="card"><b>Exportar este evento</b><p class="m" style="margin:4px 0 10px">Resumo informativo (não é uma fatura).</p><a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=xlsx">Excel</a></div>' if v else "") + dele
-            + CUJS + '<script nonce="__NONCE__">(function(){var L=document.getElementById("items"),T=document.getElementById("tot");function tot(){var s=0;L.querySelectorAll("[name=amt]").forEach(function(i){s+=parseFloat(i.value.replace(",","."))||0});T.textContent=s.toFixed(2).replace(".","' + dsep() + '")+" €";if(window.TX)window.TX(s)}'
+            + CUJS + '<script nonce="__NONCE__">(function(){var L=document.getElementById("items"),T=document.getElementById("tot");function tot(){var s=0;L.querySelectorAll("[name=amt]").forEach(function(i){s+=parseFloat(i.value.replace(",","."))||0});if(window.OT)s+=OT();T.textContent=s.toFixed(2).replace(".","' + dsep() + '")+" €";if(window.TX)window.TX(s)}'
             'L.addEventListener("input",tot);tot();document.getElementById("add").onclick=function(){var d=document.createElement("div");d.className="it";d.innerHTML=\'<input name="label" list="sug" placeholder="' + tx("Descrição") + '"><input name="amt" inputmode="decimal" placeholder="0' + dsep() + '00">\';L.appendChild(d);d.firstChild.focus()};'
             'var S=document.getElementById("cs"),I=document.getElementById("ci");function inf(){var o=S.options[S.selectedIndex];I.textContent=o.dataset.i||"";I.hidden=!o.dataset.i}S.onchange=inf;inf();'
             'var a=document.getElementById("sd"),b=document.getElementById("ed");a.onchange=function(){if(!b.value||b.value<a.value)b.value=a.value}})();</script>'
             + '<script nonce="__NONCE__">(function(){var X=document.getElementById("tx"),V=document.querySelector("[name=vat]"),W=document.querySelector("[name=wh]"),VC=document.querySelector("[name=vatc]"),WC=document.querySelector("[name=whc]"),DS="' + dsep() + '";'
             'function n(x){return parseFloat(String(x).replace(",","."))||0}function f(x){return x.toFixed(2).replace(".",DS)+" €"}function p(x){return String(x).replace(".",DS)}'
-            'window.TX=function(b){if(b===undefined){b=0;document.querySelectorAll("[name=amt]").forEach(function(i){b+=n(i.value)})}'
+            'window.TX=function(b){if(b===undefined){b=0;document.querySelectorAll("[name=amt]").forEach(function(i){b+=n(i.value)});if(window.OT)b+=OT()}'
             'var vr=V.value=="custom"?n(VC.value):(V.value=="none"||V.value=="rc")?0:n(V.value),wr=W.value=="custom"?n(WC.value):n(W.value),v=b*vr/100,w=b*wr/100,h="";'
             'if(vr>0)h+="<div><span>"+X.dataset.iva+" "+p(vr)+"%</span><span>+"+f(v)+"</span></div>";else if(V.value=="rc")h+="<div><span>"+X.dataset.rc+"</span><span>"+f(0)+"</span></div>";'
             'if(wr>0)h+="<div><span>"+X.dataset.ret+" "+p(wr)+"%</span><span>\u2212"+f(w)+"</span></div>";'
             'if(vr>0||wr>0)h+="<div class=tt><span>"+X.dataset.tot+"</span><span>"+f(b+v-w)+"</span></div>";X.innerHTML=h};'
-            '[V,W,VC,WC].forEach(function(e){e.addEventListener("input",function(){TX()});e.addEventListener("change",function(){TX()})});TX()})();</script>', "/events", u)
+            '[V,W,VC,WC].forEach(function(e){e.addEventListener("input",function(){TX()});e.addEventListener("change",function(){TX()})});TX()})();</script>'
+            + '<script nonce="__NONCE__">(function(){var B=document.getElementById("otb"),R=document.getElementById("otr"),D=document.getElementById("otd"),S=document.getElementById("ots"),a=document.getElementById("sd"),b=document.getElementById("ed"),DS="' + dsep() + '",LB="' + eh(tx("Horas extra")) + '";'
+            'function n(x){return parseFloat(String(x).replace(",","."))||0}function m(x){return (Math.round(x*100)/100).toString().replace(".",DS)}'
+            'function days(){var o=[],s=a.value,e=b.value;if(!s||!e||e<s)return o;var d=new Date(s+"T00:00:00Z"),z=new Date(e+"T00:00:00Z");while(d<=z&&o.length<62){o.push(d.toISOString().slice(0,10));d.setUTCDate(d.getUTCDate()+1)}return o}'
+            'var first=(D.dataset.h||"").split(",");'
+            'function ext(){var base=n(B.value),x=0;D.querySelectorAll("input").forEach(function(i){var h=n(i.value);if(base>0&&h>base)x+=h-base});return x}'
+            'window.OT=function(){return Math.round(ext()*n(R.value)*100)/100};'
+            'function calc(){var x=ext(),r=n(R.value);S.hidden=!(x>0&&r>0);if(!S.hidden)S.innerHTML=LB+" <small>("+m(x)+" h × "+m(r)+" €)</small><span>"+m(x*r)+" €</span>";document.getElementById("items").dispatchEvent(new Event("input",{bubbles:true}))}'
+            'function build(){var cur=[].map.call(D.querySelectorAll("input"),function(i){return i.value});if(!cur.length)cur=first;D.innerHTML="";days().forEach(function(d,k){var l=document.createElement("label");l.className="od";l.innerHTML="<span>"+d.slice(8)+"/"+d.slice(5,7)+"</span>";var i=document.createElement("input");i.name="oth";i.setAttribute("inputmode","decimal");i.value=cur[k]||"";l.appendChild(i);D.appendChild(l)});calc()}'
+            '[B,R].forEach(function(i){i.addEventListener("input",calc)});D.addEventListener("input",calc);a.addEventListener("change",build);b.addEventListener("change",build);build()})();</script>', "/events", u)
 
     def save_event(self, u, f):
         vm, vr = parse_vat(f.get("vat", "none"), f.get("vatc", "")); wr = parse_wh(f.get("wh", "0"), f.get("whc", ""))
@@ -1408,16 +1424,25 @@ class H(BaseHTTPRequestHandler):
         sd = okdate(f.get("start", "")) or today().isoformat(); ed = okdate(f.get("end", "")) or sd; ed = sd if ed < sd else ed
         cid = f.get("client_id") if one("select 1 from clients where id=? and user_id=?", (f.get("client_id") or 0, i)) else None
         its = [(l.strip()[:80], num(a)) for l, a in zip(self.fl.get("label", []), self.fl.get("amt", [])) if l.strip() or a.strip()]
+        ndays = min((dt.date.fromisoformat(ed) - dt.date.fromisoformat(sd)).days + 1, 62); ob, orate = max(num(f.get("ot_base", "0")), 0), max(num(f.get("ot_rate", "0")), 0)
+        oh = [num(x) if x.strip() else 0 for x in self.fl.get("oth", [])[:ndays]]; extra = sum(h - ob for h in oh if ob > 0 and h > ob); auto = None
+        if extra > 0 and orate > 0:
+            auto = (f"{tx('Horas extra')} ({extra:g} h × {eur(orate).replace(chr(8239), ' ').replace(chr(160), ' ')})", round(extra * orate, 2))
         inv = okdate(f.get("invoice_date", "")); paid = 1 if f.get("paid") else 0; t = today().isoformat()
         if paid and not inv: inv = t
         if not inv: paid = 0
         pd = (ex["paid_date"] if ex and ex["paid_date"] else t) if paid else None
         v = (f.get("title", "").strip()[:150] or "Evento", sd, ed, cid, sum(a for _, a in its), inv, f.get("invoice_no", "").strip()[:40], paid, pd, f.get("notes", "")[:2000], vm, vr, wr)
+        v = v[:4] + (round(sum(a for _, a in its) + (auto[1] if auto else 0), 2),) + v[5:]
         c = db()
         try:
           if ex: c.execute("update events set title=?,start_date=?,end_date=?,client_id=?,amount=?,invoice_date=?,invoice_no=?,paid=?,paid_date=?,notes=?,vat_mode=?,vat_rate=?,wh_rate=? where id=?", v + (ex["id"],)); eid = ex["id"]
           else: eid = c.execute("insert into events(title,start_date,end_date,client_id,amount,invoice_date,invoice_no,paid,paid_date,notes,vat_mode,vat_rate,wh_rate,user_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", v + (i,)).lastrowid
-          c.execute("delete from items where event_id=?", (eid,)); c.executemany("insert into items(event_id,label,amount) values(?,?,?)", [(eid, l, a) for l, a in its]); c.commit()
+          c.execute("delete from items where event_id=?", (eid,)); c.executemany("insert into items(event_id,label,amount,auto) values(?,?,?,0)", [(eid, l, a) for l, a in its])
+          if auto: c.execute("insert into items(event_id,label,amount,auto) values(?,?,?,1)", (eid,) + auto)
+          if ob > 0 or orate > 0 or any(oh): c.execute("insert into ot(event_id,base,rate,hours) values(?,?,?,?) on conflict(event_id) do update set base=excluded.base,rate=excluded.rate,hours=excluded.hours", (eid, ob, orate, ",".join(f"{h:g}" if h else "" for h in oh)))
+          else: c.execute("delete from ot where event_id=?", (eid,))
+          c.commit()
         finally: c.close()
         self.go("/events")
 

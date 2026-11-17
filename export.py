@@ -335,7 +335,7 @@ def xlsx_event(doc):
     sh.image = True; sh.heights[1] = 26; sh.heights[2] = 22; sh.set(1, 2, doc["site"], "title"); sh.set(2, 2, doc["title"], "sub"); r = 4
     for k, v in doc["issuer_kv"]: sh.set(r, 1, k, "label"); sh.set(r, 2, v, "text"); r += 1
     r += 1; sh.set(r, 1, r0["title"], "title"); sh.heights[r] = 24; r += 1
-    for k, v in [(T["dates"], doc["dates"]), (T["status"], T["st_" + r0["state"]])] + doc["client"] + doc["invoice"]:
+    for k, v in [(T["dates"], doc["dates"]), (T["status"], T["st_" + r0["state"]])] + (doc["client"] or []) + doc["invoice"]:
         sh.set(r, 1, k, "label"); sh.set(r, 2, v, "text"); r += 1
     r += 1; sh.set(r, 1, T["desc"], "header"); sh.set(r, 2, "", "header"); sh.set(r, 3, T["amount"], "header"); sh.merges.append(f"A{r}:B{r}"); r += 1; first = r
     for lab, amt in doc["lines"]: sh.set(r, 1, lab or "—", "text"); sh.set(r, 2, "", "text"); sh.merges.append(f"A{r}:B{r}"); sh.set(r, 3, round(amt, 2), "money"); r += 1

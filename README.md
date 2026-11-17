@@ -78,3 +78,6 @@ Admin → Email: servidor, porta, segurança, utilizador, palavra-passe (cifrada
 
 ## Email de fatura
 O email enviado ao cliente é HTML responsivo: cabeçalho com o nome do utilizador, texto de agradecimento personalizável, cartão com o resumo (evento, datas, n.º e data da fatura, total a pagar), contactos, IBAN (Definições → Dados pessoais) e um cartão de apresentação do Claquete (desligável nas definições do envio). O assunto inclui sempre o nome do utilizador.
+
+## Horas extra
+No evento, «Horas extra (opcional)»: horas incluídas por dia, valor por hora extra e as horas feitas em cada dia. As horas acima do contrato (por dia) × o valor por hora é somado ao valor do evento como linha automática «Horas extra (X h × Y €)», que entra no IVA, retenção, exportações e emails. Não é preciso editar a linha: é recalculada ao guardar.
