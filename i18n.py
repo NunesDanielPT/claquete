@@ -918,6 +918,7 @@ P += [
     ('Pausa não paga (minutos por dia)', 'Unpaid break (minutes per day)', 'Pausa no pagada (minutos por día)', 'Pause non payée (minutes par jour)', 'Pausa non pagata (minuti al giorno)'),
     ('Entrada, saída e horas de cada dia', 'Start, end and hours of each day', 'Entrada, salida y horas de cada día', 'Arrivée, départ et heures de chaque jour', 'Entrata, uscita e ore di ogni giorno'),
     ('Entrada', 'Start', 'Entrada', 'Arrivée', 'Entrata'),
+    ('Multiplicar pelo número de dias do evento', 'Multiply by the number of days of the event', 'Multiplicar por el número de días del evento', "Multiplier par le nombre de jours de l'événement", "Moltiplica per il numero di giorni dell'evento"),
     ('Saída', 'End', 'Salida', 'Départ', 'Uscita'),
     ('Horas', 'Hours', 'Horas', 'Heures', 'Ore'),
 ]
