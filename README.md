@@ -85,3 +85,7 @@ No evento, «Horas extra (opcional)»: horas incluídas por dia, valor por hora 
 
 ### Horas extra: entrada e saída
 No formulário do evento, para cada dia indicas a hora de **entrada** e de **saída** (turnos que passam da meia-noite são suportados) e, opcionalmente, uma **pausa não paga** em minutos. As horas de cada dia são calculadas automaticamente (o campo Horas continua editável à mão). As horas acima do contrato × valor por hora extra são somadas ao total do evento.
+
+### Calendário: voltar ao mês e diária × dias
+- Ao criar ou abrir um evento a partir do calendário, depois de guardar (ou cancelar) voltas ao mesmo mês do calendário.
+- Em cada linha de valores aparece, nos eventos de mais de 1 dia, uma caixa "×N": se a marcares, o valor da linha é multiplicado pelo número de dias do evento (ex.: diária 200 € × 5 = 1000 €). Sem marcar, continua manual.

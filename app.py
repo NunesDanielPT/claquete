@@ -126,6 +126,8 @@ def migrate(c):
         if oc and col not in oc: c.execute(f"alter table ot add column {col} {ddl}")
     ic = {r[1] for r in c.execute("pragma table_info(items)")}
     if ic and "auto" not in ic: c.execute("alter table items add column auto integer default 0")
+    for col, ddl in (("mult", "integer default 0"), ("unit", "real"), ("lab", "text")):
+        if ic and col not in ic: c.execute(f"alter table items add column {col} {ddl}")
     cc = {r[1] for r in c.execute("pragma table_info(clients)")}
     if cc and "email" not in cc: c.execute("alter table clients add column email text")
     fc = {r[1] for r in c.execute("pragma table_info(friends)")}
@@ -387,7 +389,7 @@ form.f label{display:block;margin:14px 0 4px;font-weight:600;font-size:.86rem;co
 form.f input:not([type=checkbox]),form.f select,form.f textarea{width:100%;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
 input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
 form.f label.c{display:flex;gap:10px;align-items:center;color:var(--ink);font-size:1rem;font-weight:500}form.f input[type=checkbox]{width:20px;height:20px}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.it{display:grid;grid-template-columns:1fr 140px;gap:8px;margin-bottom:8px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.it{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-bottom:8px}.ia{display:flex;gap:8px;align-items:center}form.f .ia input[name=amt]{width:130px;min-width:0}.f .mx{display:flex;align-items:center;gap:4px;margin:0;font-size:.85rem;color:var(--mut);white-space:nowrap;font-weight:600}.mx[hidden]{display:none}
 .sum{display:flex;justify-content:space-between;align-items:center;padding:10px 2px;font-weight:700}.sum span{font-size:1.3rem;font-variant-numeric:tabular-nums}
 .info{background:color-mix(in srgb,var(--brand) 10%,transparent);padding:10px 12px;border-radius:10px;margin-top:8px;font-size:.9rem}.info[hidden]{display:none}
 details summary{cursor:pointer;color:var(--todo);margin-top:18px}.msg{padding:10px 12px;border-radius:10px;margin:0 0 14px;font-size:.92rem}.msg.err{background:color-mix(in srgb,var(--todo) 14%,transparent);color:var(--todo)}.msg.ok{background:color-mix(in srgb,var(--paid) 16%,transparent)}
@@ -414,7 +416,7 @@ details summary{cursor:pointer;color:var(--todo);margin-top:18px}.msg{padding:10
 .side .brand,.side .sp,.side .acct{display:none}.nl{flex:1;flex-direction:column;gap:1px;padding:6px 2px;font-size:.68rem;align-items:center;text-align:center}
 .main{padding-top:18px}.strip{grid-template-columns:1fr 1fr}.st:nth-child(3){border-left:0}.st:nth-child(n+3){border-top:3px solid var(--c)}.st b{font-size:1.3rem}
 .er{flex-wrap:wrap}.ea{width:100%;justify-content:space-between}:root{--lh:20px}.bar{font-size:.68rem;padding:0 4px}.cell{padding:3px 4px;font-size:.74rem}.wk{min-height:84px}
-.auth{grid-template-columns:1fr}.hero{padding:24px 18px;gap:12px}.hero .tl,.hero .lgd,.hero p{display:none}.hero h1{font-size:1.5rem}.g2{grid-template-columns:1fr}.it{grid-template-columns:1fr 110px}.hb{grid-template-columns:90px 1fr auto}}
+.auth{grid-template-columns:1fr}.hero{padding:24px 18px;gap:12px}.hero .tl,.hero .lgd,.hero p{display:none}.hero h1{font-size:1.5rem}.g2{grid-template-columns:1fr}form.f .ia input[name=amt]{width:96px}.hb{grid-template-columns:90px 1fr auto}}
 """
 CSS += guide_art.CSS
 
@@ -765,13 +767,18 @@ def tog(r, nxt):
         return f'<form method="post" action="/toggle/{r["id"]}/{f}"><input type="hidden" name="next" value="{e(nxt)}"><button class="chip {cl}{" on" if on else ""}">{"✓ " if on else ""}{label}</button></form>'
     return '<div class="tg">' + b("invoiced", "Faturada", r["invoice_date"], "f") + b("paid", "Paga", r["paid"], "p2") + "</div>"
 
+def safe_back(x):
+    x = x or ""
+    return x if x.startswith("/") and not x.startswith("//") and "\\" not in x and len(x) < 200 and not re.search(r"[\r\n]", x) else ""
+
+
 def ev_row(r, nxt):
     v_, w_, t_ = tax_of(r)
     tl = f'<small class="tl" title="{eh("Total a receber")}">= {eur(t_)}</small>' if (v_ or w_) else ""
     meta = f'{drange(r["start_date"], r["end_date"])} · {(e(r["cn"]) if r["cn"] else "sem cliente")}'
     if r["invoice_date"]: meta += f' · faturada {ds(r["invoice_date"])}'
     elif r["end_date"] < today().isoformat(): meta += ' · <em class="late">terminou, falta faturar</em>'
-    return (f'<div class="er {state(r)}"><a class="eh" href="/event/{r["id"]}">{avatar(r["cn"] or "?", r["cl"])}<div><b>{e(r["title"])}</b><small>{meta}</small></div></a>'
+    return (f'<div class="er {state(r)}"><a class="eh" href="/event/{r["id"]}{("?back=" + quote(nxt, safe="")) if nxt.startswith("/calendar") else ""}">{avatar(r["cn"] or "?", r["cl"])}<div><b>{e(r["title"])}</b><small>{meta}</small></div></a>'
             f'<div class="ea"><span class="amt">{eur(r["amount"])}</span>{tl}{tog(r, nxt)}</div></div>')
 
 def lst(rs, nxt, empty): return '<div class="list">' + ("".join(ev_row(r, nxt) for r in rs) or f'<div class="empty">{empty}</div>') + "</div>"
@@ -863,7 +870,7 @@ class H(BaseHTTPRequestHandler):
             if p == "/clients": return self.out(self.clients(u))
             if p == "/stats": return self.out(self.stats(u, g("y"), g))
             if p == "/settings": return self.out(self.settings(u, ok=g("ok")))
-            if parts[0] == "event" and len(parts) == 2: return self.out(self.event_form(u, parts[1], g("date")))
+            if parts[0] == "event" and len(parts) == 2: return self.out(self.event_form(u, parts[1], g("date"), safe_back(g("back"))))
             if parts[0] == "client" and len(parts) == 2: return self.out(self.client_form(u, parts[1]))
         except (ValueError, KeyError, TypeError): pass
         self.out(page("Não encontrado", "<h1>Página não encontrada</h1>", "", u), 404)
@@ -1373,23 +1380,23 @@ class H(BaseHTTPRequestHandler):
         chips = "".join(f'<a class="{"on" if f == k else ""}" href="/events?f={k}">{n}</a>' for k, n in [("todos", "Todos"), ("agendados", "Por realizar"), ("faturar", "Por faturar"), ("receber", "Por receber"), ("pagos", "Pagos")])
         return page("Eventos", f'<div class="bar-h"><h1>Eventos</h1><a class="btn p" href="/event/new">Novo evento</a></div><div class="chips">{chips}</div>' + lst(r, f"/events?f={f}", "Sem eventos." + ('<br><a href="/guide/2">Vê como agendar o primeiro</a>' if not one("select 1 from events where user_id=?", (u["id"],)) else "")), "/events", u)
 
-    def event_form(self, u, i, date=""):
+    def event_form(self, u, i, date="", back=""):
         v = None
         if i != "new":
             v = one("select * from events where id=? and user_id=?", (i, u["id"]))
             if not v: raise ValueError
-        its = [(x["label"], x["amount"]) for x in rows("select * from items where event_id=? and coalesce(auto,0)=0 order by id", (i,))] if v else []
+        its = [((x["lab"] or x["label"]) if x["mult"] else x["label"], x["unit"] if x["mult"] else x["amount"], 1 if x["mult"] else 0) for x in rows("select * from items where event_id=? and coalesce(auto,0)=0 order by id", (i,))] if v else []
         ot = one("select * from ot where event_id=?", (i,)) if v else None; otf = lambda x: f"{x:g}".replace(".", dsep()) if x else ""
         sd = v["start_date"] if v else (okdate(date) or today().isoformat()); ed = v["end_date"] if v else sd
         cl = "".join(f'<option value="{c["id"]}" data-i="{e(" · ".join(x for x in (c["rate"], c["terms"]) if x))}" {"selected" if v and c["id"] == v["client_id"] else ""}>{e(c["name"])}</option>' for c in rows("select * from clients where user_id=? order by name", (u["id"],)))
-        rowsh = "".join(f'<div class="it"><input name="label" list="sug" value="{e(l)}" placeholder="Descrição"><input name="amt" inputmode="decimal" value="{f"{a:g}".replace(".", dsep())}" placeholder="0{dsep()}00"></div>' for l, a in (its or [(tx("Diária"), 0)]))
+        rowsh = "".join(f'<div class="it"><input name="label" list="sug" value="{e(l)}" placeholder="Descrição"><div class="ia"><input name="amt" inputmode="decimal" value="{f"{a:g}".replace(".", dsep())}" placeholder="0{dsep()}00"><label class="mx" hidden title="{eh(tx("Multiplicar pelo número de dias do evento"))}"><input type="checkbox" class="mc"{" checked" if mu else ""}><span></span><input type="hidden" name="mul" value="{mu}"></label></div></div>' for l, a, mu in (its or [(tx("Diária"), 0, 0)]))
         dele = f'<details><summary>Apagar evento</summary><form method="post" action="/event/{v["id"]}/delete"><p class="m">Esta ação não pode ser desfeita.</p><button class="d">Confirmar: apagar</button></form></details>' if v else ""
         ck = lambda x: "checked" if x else ""
-        return page("Evento", f'<h1>{"Editar" if v else "Novo"} evento</h1><form class="f card" method="post" action="/event/save"><input type="hidden" name="id" value="{v["id"] if v else ""}">'
+        return page("Evento", f'<h1>{"Editar" if v else "Novo"} evento</h1><form class="f card" method="post" action="/event/save"><input type="hidden" name="id" value="{v["id"] if v else ""}"><input type="hidden" name="back" value="{e(back)}">'
             + fld("Título", "title", val=v["title"] if v else "", extra="required" + ("" if v else " autofocus"))
             + f'<div class="g2"><div><label>Data de início</label><input type="date" id="sd" name="start" value="{sd}" required></div><div><label>Data de fim</label><input type="date" id="ed" name="end" value="{ed}" required></div></div>'
             f'<label>Cliente</label><select id="cs" name="client_id"><option value="">— sem cliente —</option>{cl}</select><div class="info" id="ci" hidden></div>'
-            f'<label>Valores</label><div id="items">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><details class="otd" id="otw"{" open" if ot else ""}><summary>⏱ Horas extra (opcional)</summary><p class="m">Diz quantas horas o teu valor diário inclui e preenche a hora de entrada e de saída de cada dia: as horas são calculadas sozinhas. As que passam do limite são pagas ao valor por hora extra e somadas ao total.</p>'
+            f'<label>Valores</label><div id="items" data-mx="{eh(tx("Multiplicar pelo número de dias do evento"))}">{rowsh}</div><button type="button" id="add">+ Adicionar linha</button><details class="otd" id="otw"{" open" if ot else ""}><summary>⏱ Horas extra (opcional)</summary><p class="m">Diz quantas horas o teu valor diário inclui e preenche a hora de entrada e de saída de cada dia: as horas são calculadas sozinhas. As que passam do limite são pagas ao valor por hora extra e somadas ao total.</p>'
             f'<div class="g2"><div><label>Horas incluídas por dia</label><input id="otb" name="ot_base" inputmode="decimal" value="{otf(ot["base"] if ot else 0)}" placeholder="10"></div><div><label>Valor por hora extra (€)</label><input id="otr" name="ot_rate" inputmode="decimal" value="{otf(ot["rate"] if ot else 0)}" placeholder="0{dsep()}00"></div></div>'
             f'<label>Pausa não paga (minutos por dia)</label><input id="otk" name="ot_brk" inputmode="numeric" value="{otf(ot["brk"] if ot else 0)}" placeholder="0" style="max-width:140px">'
             f'<label>Entrada, saída e horas de cada dia</label><div id="otd" class="otdays" data-h="{e(ot["hours"] if ot else "")}" data-i="{e(ot["tin"] or "" if ot else "")}" data-o="{e(ot["tout"] or "" if ot else "")}" data-e="{eh(tx("Entrada"))}" data-s="{eh(tx("Saída"))}" data-t="{eh(tx("Horas"))}"></div><div class="sum" id="ots" hidden></div></details>'
@@ -1399,14 +1406,14 @@ class H(BaseHTTPRequestHandler):
             '<datalist id="sug">' + "".join(f'<option value="{eh(tx(x))}">' for x in ("Diária", "Meia diária", "Hora extra", "Aluguer de equipamento", "Deslocação", "Edição")) + '</datalist>'
             + f'<div class="g2"><div><label>Data da fatura (vazio = por faturar)</label><input type="date" name="invoice_date" value="{e(v["invoice_date"] if v else "")}"></div><div><label>N.º da fatura</label><input name="invoice_no" value="{e(v["invoice_no"] if v else "")}"></div></div>'
             f'<label class="c" style="margin-top:14px"><input type="checkbox" name="paid" {ck(v and v["paid"])}>Fatura paga (já recebi)</label><label>Notas</label><textarea name="notes" rows="3">{e(v["notes"] if v else "")}</textarea>'
-            '<p><button class="p">Guardar</button> <a class="btn" href="/events">Cancelar</a></p></form>' + (self.mail_card(u, v) if v else "") + (f'<div class="card"><b>Exportar este evento</b><p class="m" style="margin:4px 0 10px">Resumo informativo (não é uma fatura).</p><a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=xlsx">Excel</a></div>' if v else "") + dele
-            + CUJS + '<script nonce="__NONCE__">(function(){var L=document.getElementById("items"),T=document.getElementById("tot");function tot(){var s=0;L.querySelectorAll("[name=amt]").forEach(function(i){s+=parseFloat(i.value.replace(",","."))||0});if(window.OT)s+=OT();T.textContent=s.toFixed(2).replace(".","' + dsep() + '")+" €";if(window.TX)window.TX(s)}'
-            'L.addEventListener("input",tot);tot();document.getElementById("add").onclick=function(){var d=document.createElement("div");d.className="it";d.innerHTML=\'<input name="label" list="sug" placeholder="' + tx("Descrição") + '"><input name="amt" inputmode="decimal" placeholder="0' + dsep() + '00">\';L.appendChild(d);d.firstChild.focus()};'
+            '<p><button class="p">Guardar</button> <a class="btn" href="' + (e(back) or "/events") + '">Cancelar</a></p></form>' + (self.mail_card(u, v) if v else "") + (f'<div class="card"><b>Exportar este evento</b><p class="m" style="margin:4px 0 10px">Resumo informativo (não é uma fatura).</p><a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=pdf">PDF</a> <a class="btn" href="/export/run?scope=event&id={v["id"]}&fmt=xlsx">Excel</a></div>' if v else "") + dele
+            + CUJS + '<script nonce="__NONCE__">(function(){var L=document.getElementById("items"),T=document.getElementById("tot");function N(){var s=document.getElementById("sd").value,e=document.getElementById("ed").value;if(!s||!e||e<s)return 1;return Math.min(Math.round((new Date(e)-new Date(s))/864e5)+1,62)}window.AMT=function(){var s=0,k=N();L.querySelectorAll(".it").forEach(function(r){var i=r.querySelector("[name=amt]"),c=r.querySelector(".mc");s+=(parseFloat(i.value.replace(",","."))||0)*(c&&c.checked&&k>1?k:1)});return s};function mx(){var k=N();L.querySelectorAll(".mx").forEach(function(l){l.hidden=k<2;l.title=L.dataset.mx;l.querySelector("span").textContent="\u00d7"+k})}function tot(){var s=AMT();mx();if(window.OT)s+=OT();T.textContent=s.toFixed(2).replace(".","' + dsep() + '")+" €";if(window.TX)window.TX(s)}'
+            'L.addEventListener("input",tot);L.addEventListener("change",function(ev){var c=ev.target;if(c.classList&&c.classList.contains("mc")){c.parentNode.querySelector("[name=mul]").value=c.checked?1:0;tot()}});tot();document.getElementById("add").onclick=function(){var d=document.createElement("div");d.className="it";d.innerHTML=\'<input name="label" list="sug" placeholder="' + tx("Descrição") + '"><div class="ia"><input name="amt" inputmode="decimal" placeholder="0' + dsep() + '00"><label class="mx" hidden><input type="checkbox" class="mc"><span></span><input type="hidden" name="mul" value="0"></label></div>\';L.appendChild(d);mx();d.firstChild.focus()};'
             'var S=document.getElementById("cs"),I=document.getElementById("ci");function inf(){var o=S.options[S.selectedIndex];I.textContent=o.dataset.i||"";I.hidden=!o.dataset.i}S.onchange=inf;inf();'
-            'var a=document.getElementById("sd"),b=document.getElementById("ed");a.onchange=function(){if(!b.value||b.value<a.value)b.value=a.value}})();</script>'
+            'var a=document.getElementById("sd"),b=document.getElementById("ed");a.onchange=function(){if(!b.value||b.value<a.value)b.value=a.value};a.addEventListener("change",tot);b.addEventListener("change",tot)})();</script>'
             + '<script nonce="__NONCE__">(function(){var X=document.getElementById("tx"),V=document.querySelector("[name=vat]"),W=document.querySelector("[name=wh]"),VC=document.querySelector("[name=vatc]"),WC=document.querySelector("[name=whc]"),DS="' + dsep() + '";'
             'function n(x){return parseFloat(String(x).replace(",","."))||0}function f(x){return x.toFixed(2).replace(".",DS)+" €"}function p(x){return String(x).replace(".",DS)}'
-            'window.TX=function(b){if(b===undefined){b=0;document.querySelectorAll("[name=amt]").forEach(function(i){b+=n(i.value)});if(window.OT)b+=OT()}'
+            'window.TX=function(b){if(b===undefined){b=window.AMT();if(window.OT)b+=OT()}'
             'var vr=V.value=="custom"?n(VC.value):(V.value=="none"||V.value=="rc")?0:n(V.value),wr=W.value=="custom"?n(WC.value):n(W.value),v=b*vr/100,w=b*wr/100,h="";'
             'if(vr>0)h+="<div><span>"+X.dataset.iva+" "+p(vr)+"%</span><span>+"+f(v)+"</span></div>";else if(V.value=="rc")h+="<div><span>"+X.dataset.rc+"</span><span>"+f(0)+"</span></div>";'
             'if(wr>0)h+="<div><span>"+X.dataset.ret+" "+p(wr)+"%</span><span>\u2212"+f(w)+"</span></div>";'
@@ -1431,8 +1438,13 @@ class H(BaseHTTPRequestHandler):
         i = u["id"]; ex = one("select * from events where id=? and user_id=?", (f.get("id") or 0, i))
         sd = okdate(f.get("start", "")) or today().isoformat(); ed = okdate(f.get("end", "")) or sd; ed = sd if ed < sd else ed
         cid = f.get("client_id") if one("select 1 from clients where id=? and user_id=?", (f.get("client_id") or 0, i)) else None
-        its = [(l.strip()[:80], num(a)) for l, a in zip(self.fl.get("label", []), self.fl.get("amt", [])) if l.strip() or a.strip()]
-        ndays = min((dt.date.fromisoformat(ed) - dt.date.fromisoformat(sd)).days + 1, 62); ob, orate = max(num(f.get("ot_base", "0")), 0), max(num(f.get("ot_rate", "0")), 0)
+        ndays = min((dt.date.fromisoformat(ed) - dt.date.fromisoformat(sd)).days + 1, 62); mus = self.fl.get("mul", []) + ["0"] * 200; its = []
+        for k_, (l, a) in enumerate(zip(self.fl.get("label", []), self.fl.get("amt", []))):
+            if not (l.strip() or a.strip()): continue
+            l, u_ = l.strip()[:80], num(a)
+            if mus[k_] == "1" and ndays > 1: its.append((f"{l} ({ndays} × {eur(u_).replace(chr(8239), ' ').replace(chr(160), ' ')})"[:120], round(u_ * ndays, 2), l, u_, ndays))
+            else: its.append((l, u_, l, None, 0))
+        ob, orate = max(num(f.get("ot_base", "0")), 0), max(num(f.get("ot_rate", "0")), 0)
         brk = min(max(num(f.get("ot_brk", "0")), 0), 600); ti, to_, oh = (self.fl.get("oti", []) + [""] * ndays)[:ndays], (self.fl.get("oto", []) + [""] * ndays)[:ndays], []
         hm = lambda x: (int(x[:2]) * 60 + int(x[3:5])) if re.match(r"^\d{1,2}:\d{2}$", x or "") and int(x.split(":")[0]) < 24 and int(x.split(":")[1]) < 60 else None
         for k_, hv in enumerate((self.fl.get("oth", []) + [""] * ndays)[:ndays]):
@@ -1447,19 +1459,19 @@ class H(BaseHTTPRequestHandler):
         if paid and not inv: inv = t
         if not inv: paid = 0
         pd = (ex["paid_date"] if ex and ex["paid_date"] else t) if paid else None
-        v = (f.get("title", "").strip()[:150] or "Evento", sd, ed, cid, sum(a for _, a in its), inv, f.get("invoice_no", "").strip()[:40], paid, pd, f.get("notes", "")[:2000], vm, vr, wr)
-        v = v[:4] + (round(sum(a for _, a in its) + (auto[1] if auto else 0), 2),) + v[5:]
+        v = (f.get("title", "").strip()[:150] or "Evento", sd, ed, cid, sum(x[1] for x in its), inv, f.get("invoice_no", "").strip()[:40], paid, pd, f.get("notes", "")[:2000], vm, vr, wr)
+        v = v[:4] + (round(sum(x[1] for x in its) + (auto[1] if auto else 0), 2),) + v[5:]
         c = db()
         try:
           if ex: c.execute("update events set title=?,start_date=?,end_date=?,client_id=?,amount=?,invoice_date=?,invoice_no=?,paid=?,paid_date=?,notes=?,vat_mode=?,vat_rate=?,wh_rate=? where id=?", v + (ex["id"],)); eid = ex["id"]
           else: eid = c.execute("insert into events(title,start_date,end_date,client_id,amount,invoice_date,invoice_no,paid,paid_date,notes,vat_mode,vat_rate,wh_rate,user_id) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", v + (i,)).lastrowid
-          c.execute("delete from items where event_id=?", (eid,)); c.executemany("insert into items(event_id,label,amount,auto) values(?,?,?,0)", [(eid, l, a) for l, a in its])
+          c.execute("delete from items where event_id=?", (eid,)); c.executemany("insert into items(event_id,label,amount,auto,lab,unit,mult) values(?,?,?,0,?,?,?)", [(eid, l, a, lb, un, mu) for l, a, lb, un, mu in its])
           if auto: c.execute("insert into items(event_id,label,amount,auto) values(?,?,?,1)", (eid,) + auto)
           if ob > 0 or orate > 0 or any(oh): c.execute("insert into ot(event_id,base,rate,hours,tin,tout,brk) values(?,?,?,?,?,?,?) on conflict(event_id) do update set base=excluded.base,rate=excluded.rate,hours=excluded.hours,tin=excluded.tin,tout=excluded.tout,brk=excluded.brk", (eid, ob, orate, ",".join(f"{h:g}" if h else "" for h in oh), ",".join(x if hm(x) is not None else "" for x in ti), ",".join(x if hm(x) is not None else "" for x in to_), brk))
           else: c.execute("delete from ot where event_id=?", (eid,))
           c.commit()
         finally: c.close()
-        self.go("/events")
+        self.go(safe_back(f.get("back")) or "/events")
 
     # ---- clientes
     def clients(self, u):
@@ -1495,13 +1507,13 @@ class H(BaseHTTPRequestHandler):
                     if s > last: lanes[li] = en; lane = li; break
                 else: lanes.append(en); lane = len(lanes) - 1
                 cls = state(r) + (" cs" if r["start_date"] >= w0 else "") + (" ce" if r["end_date"] <= w1 else "")
-                bars += f'<a class="bar {cls}" style="grid-column:{s + 1}/{en + 2};grid-row:{lane + 2}" href="/event/{r["id"]}" title="{e(r["title"])} · {e(r["cn"] or "")} · {eur(r["amount"])}">{e(r["title"])}</a>'
+                bars += f'<a class="bar {cls}" style="grid-column:{s + 1}/{en + 2};grid-row:{lane + 2}" href="/event/{r["id"]}?back={quote("/calendar?m=" + first.strftime("%Y-%m"), safe="")}" title="{e(r["title"])} · {e(r["cn"] or "")} · {eur(r["amount"])}">{e(r["title"])}</a>'
             L = len(lanes)
-            cells = "".join(f'<a class="cell{" c0" if k == 0 else ""}{" out" if d.month != first.month else ""}{" we" if k > 4 else ""}{" now" if d == today() else ""}" style="grid-column:{k + 1};grid-row:1/span {L + 2}" href="/event/new?date={d.isoformat()}"><span>{d.day}</span></a>' for k, d in enumerate(wk))
+            cells = "".join(f'<a class="cell{" c0" if k == 0 else ""}{" out" if d.month != first.month else ""}{" we" if k > 4 else ""}{" now" if d == today() else ""}" style="grid-column:{k + 1};grid-row:1/span {L + 2}" href="/event/new?date={d.isoformat()}&amp;back={quote("/calendar?m=" + first.strftime("%Y-%m"), safe="")}"><span>{d.day}</span></a>' for k, d in enumerate(wk))
             out += f'<div class="wk" style="grid-template-rows:30px repeat({L},var(--lh)) minmax(8px,1fr)">{cells}{bars}</div>'
         fm, lm = first.isoformat(), ((first + dt.timedelta(32)).replace(day=1) - dt.timedelta(1)).isoformat()
         month_ev = rows(EV + "where e.user_id=? and e.start_date<=? and e.end_date>=? order by e.start_date", (i, lm, fm))
-        return page("Calendário", f'<div class="bar-h"><div class="mn" style="margin:0"><a class="btn" href="/calendar?m={prev}">‹</a><b style="font-size:1.3rem">{MES[first.month - 1]} {first.year}</b><a class="btn" href="/calendar?m={nxt}">›</a><a class="btn" href="/calendar">Hoje</a></div><a class="btn p" href="/event/new">Novo evento</a></div>'
+        return page("Calendário", f'<div class="bar-h"><div class="mn" style="margin:0"><a class="btn" href="/calendar?m={prev}">‹</a><b style="font-size:1.3rem">{MES[first.month - 1]} {first.year}</b><a class="btn" href="/calendar?m={nxt}">›</a><a class="btn" href="/calendar">Hoje</a></div><a class="btn p" href="/event/new?back={quote("/calendar?m=" + first.strftime("%Y-%m"), safe="")}">Novo evento</a></div>'
             '<div class="cal"><div class="dh">' + "".join(f"<div>{d}</div>" for d in ("Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom")) + f'</div>{out}</div>'
             '<div class="lgd m"><span style="--c:var(--todo)">por faturar</span><span style="--c:var(--inv)">faturada</span><span style="--c:var(--paid)">paga</span><span>toca num dia para criar um evento</span></div>'
             + "<h2>Neste mês</h2>" + lst(month_ev, f"/calendar?m={first:%Y-%m}", "Sem eventos neste mês."), "/calendar", u)
